@@ -1,9 +1,21 @@
 import re
+import importlib
+import ctypes
 import tkinter as tk
 from tkinter import ttk
-from tkinter import messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
 import subprocess
+from datetime import date
+from ctypes import wintypes
 from pathlib import Path
+
+try:
+    _tkinterdnd2 = importlib.import_module("tkinterdnd2")
+    DND_FILES = _tkinterdnd2.DND_FILES
+    TkinterDnD = _tkinterdnd2.TkinterDnD
+except ImportError:
+    DND_FILES = None
+    TkinterDnD = None
 
 default_server_name = r"\\applemango"
 default_drive_letter = "Z"
@@ -132,6 +144,74 @@ def get_network_info_text():
                 ssid = found_ssid
 
     return f"IP: {ip_addr}    SSID: {ssid}"
+
+def get_server_share_names(server_name):
+    normalized_server = server_name.strip().lstrip("\\")
+    if not normalized_server:
+        return None
+
+    class SHARE_INFO_1(ctypes.Structure):
+        _fields_ = [
+            ("shi1_netname", wintypes.LPWSTR),
+            ("shi1_type", wintypes.DWORD),
+            ("shi1_remark", wintypes.LPWSTR)
+        ]
+
+    netapi32 = ctypes.WinDLL("Netapi32.dll")
+    net_share_enum = netapi32.NetShareEnum
+    net_share_enum.argtypes = [
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD)
+    ]
+    net_share_enum.restype = wintypes.DWORD
+
+    net_api_buffer_free = netapi32.NetApiBufferFree
+    net_api_buffer_free.argtypes = [ctypes.c_void_p]
+    net_api_buffer_free.restype = wintypes.DWORD
+
+    shares = []
+    resume_handle = wintypes.DWORD(0)
+    server_unc = f"\\\\{normalized_server}"
+
+    while True:
+        buffer = ctypes.c_void_p()
+        entries_read = wintypes.DWORD(0)
+        total_entries = wintypes.DWORD(0)
+
+        status = net_share_enum(
+            server_unc,
+            1,
+            ctypes.byref(buffer),
+            0xFFFFFFFF,
+            ctypes.byref(entries_read),
+            ctypes.byref(total_entries),
+            ctypes.byref(resume_handle)
+        )
+
+        if status not in (0, 234):
+            if buffer:
+                net_api_buffer_free(buffer)
+            return None
+
+        if entries_read.value and buffer:
+            share_array = ctypes.cast(buffer, ctypes.POINTER(SHARE_INFO_1))
+            for index in range(entries_read.value):
+                share_name = share_array[index].shi1_netname
+                if share_name and not share_name.endswith("$"):
+                    shares.append(share_name)
+
+        if buffer:
+            net_api_buffer_free(buffer)
+
+        if status == 0:
+            break
+
+    return list(dict.fromkeys(shares))
 
 def login_to_server(root, on_ui_refresh, on_auth_refresh, on_login_status_refresh):
     global session_logged_in, session_username, session_password, session_account_name
@@ -318,17 +398,20 @@ def map_network_drive(root, on_drive_changed):
         return
 
     # 1) Discover shares on the configured server (Unicode-safe first path)
-    shares = []
-    try:
-        server_root = Path(default_server_name)
-        for child in server_root.iterdir():
-            name = child.name
-            if name and not name.endswith("$"):
-                shares.append(name)
-    except OSError:
-        shares = []
+    shares = get_server_share_names(default_server_name) or []
 
-    # Fallback to net view parsing if UNC listing fails.
+    # Secondary path: filesystem enumeration.
+    if not shares:
+        try:
+            server_root = Path(default_server_name)
+            for child in server_root.iterdir():
+                name = child.name
+                if name and not name.endswith("$"):
+                    shares.append(name)
+        except OSError:
+            shares = []
+
+    # Final fallback to net view parsing if API and UNC listing fail.
     if not shares:
         shares_result = run_net_command(f"net view {default_server_name}")
 
@@ -716,36 +799,321 @@ def unmap_network_drive(root, on_drive_changed):
     validate_unmap_selection()
 
 def run_archiver(root):
-    # archiver logic, automatic process once running. start by scanning the inbox folder
+    archiver_window = tk.Toplevel(root)
+    archiver_window.title("Run Archiver")
+    archiver_window.geometry("560x680")
+    archiver_window.configure(bg = "white")
+    archiver_window.transient(root)
+    archiver_window.grab_set()
 
-    warning_message = "Archiving will move files from the inbox to the archive folder. Do you want to proceed?"
-    if messagebox.askyesno("Confirm Archiving", warning_message):
-        # proceed with archiving
-        pass
-    
-    messagebox.showinfo(
-        "Testing the script",
-        "The program will print the number of files in this directory"
+    selected_files = []
+    selected_directory_var = tk.StringVar(value = "사단법인 애플망고러브트리")
+    selected_subdirectory_var = tk.StringVar(value = "")
+    destination_preview_var = tk.StringVar()
+    status_var = tk.StringVar(value = "0 files ready")
+
+    default_top_directories = [
+        "사단법인 애플망고러브트리",
+        "애플망고 선교회",
+        "주식회사 히즈컴",
+        "필레오 기독국제학교",
+        "한소망교회"
+    ]
+
+    container = tk.Frame(archiver_window, bg = "white", padx = 18, pady = 16)
+    container.pack(fill = "both", expand = True)
+
+    button_row = tk.Frame(container, bg = "white")
+    button_row.pack(fill = "x", pady = (0, 10))
+
+    selected_files_list = tk.Frame(container, bg = "white")
+
+    def update_preview_and_status(*_):
+        subdir = selected_subdirectory_var.get().strip()
+        preview_parts = [get_drive_target(), "Archive", selected_directory_var.get().strip()]
+        if subdir:
+            preview_parts.append(subdir)
+        preview_parts.append(str(date.today().year))
+        destination_preview_var.set("/".join(preview_parts) + "/")
+        status_var.set(f"{len(selected_files)} files ready")
+
+    def remove_selected_file(file_path):
+        if file_path in selected_files:
+            selected_files.remove(file_path)
+            refresh_selected_files_view()
+
+    def refresh_selected_files_view():
+        for child in selected_files_list.winfo_children():
+            child.destroy()
+
+        for file_path in selected_files:
+            row = tk.Frame(selected_files_list, bg = "white")
+            row.pack(fill = "x", pady = 1)
+
+            tk.Label(
+                row,
+                text = f"- {Path(file_path).name}",
+                font = ("Segoe UI", 9),
+                bg = "white",
+                fg = "#333333",
+                anchor = "w",
+                justify = "left"
+            ).pack(side = "left", fill = "x", expand = True)
+
+            tk.Button(
+                row,
+                text = "x",
+                width = 2,
+                bg = "white",
+                activebackground = "#efefef",
+                fg = "#666666",
+                relief = "flat",
+                bd = 0,
+                highlightthickness = 0,
+                cursor = "hand2",
+                command = lambda p = file_path: remove_selected_file(p)
+            ).pack(side = "right")
+
+        update_preview_and_status()
+
+    def add_file_paths(paths):
+        normalized_paths = []
+        for raw_path in paths:
+            candidate = str(raw_path).strip().strip("{}")
+            if candidate and Path(candidate).is_file():
+                normalized_paths.append(str(Path(candidate)))
+
+        if not normalized_paths:
+            return
+
+        seen = set(selected_files)
+        for file_path in normalized_paths:
+            if file_path not in seen:
+                selected_files.append(file_path)
+                seen.add(file_path)
+
+        refresh_selected_files_view()
+
+    def add_folder_paths(folder_paths):
+        discovered_files = []
+        for raw_folder in folder_paths:
+            folder_candidate = str(raw_folder).strip().strip("{}")
+            folder_path = Path(folder_candidate)
+            if folder_candidate and folder_path.is_dir():
+                discovered_files.extend(str(p) for p in folder_path.rglob("*") if p.is_file())
+
+        add_file_paths(discovered_files)
+
+    def pick_files():
+        files = filedialog.askopenfilenames(parent = archiver_window, title = "Add files")
+        if files:
+            add_file_paths(files)
+
+    def pick_folder():
+        folder = filedialog.askdirectory(parent = archiver_window, title = "Add folder")
+        if folder:
+            add_folder_paths([folder])
+
+    def handle_drop(event):
+        dropped_items = archiver_window.tk.splitlist(event.data)
+        file_items = []
+        folder_items = []
+
+        for item in dropped_items:
+            normalized_item = str(item).strip().strip("{}")
+            if not normalized_item:
+                continue
+            path_obj = Path(normalized_item)
+            if path_obj.is_file():
+                file_items.append(normalized_item)
+            elif path_obj.is_dir():
+                folder_items.append(normalized_item)
+
+        if file_items:
+            add_file_paths(file_items)
+        if folder_items:
+            add_folder_paths(folder_items)
+
+        return event.action if hasattr(event, "action") else None
+
+    tk.Button(
+        button_row,
+        text = "Add Files",
+        width = 16,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = pick_files
+    ).pack(side = "left")
+
+    tk.Button(
+        button_row,
+        text = "Add Folder",
+        width = 16,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = pick_folder
+    ).pack(side = "left", padx = (8, 0))
+
+    attachment_canvas = tk.Canvas(
+        container,
+        height = 94,
+        bg = "white",
+        highlightthickness = 0,
+        bd = 0,
+        cursor = "hand2"
     )
+    attachment_canvas.pack(fill = "x", pady = (0, 12))
 
-    mapped_drive_path = Path(f"{get_drive_target()}\\")
-
-    if not mapped_drive_path.exists() or not mapped_drive_path.is_dir():
-        messagebox.showerror(
-            "Drive Not Found",
-            f"{get_drive_target()} is not accessible. Please map the network drive first."
-        )
-        return
-
-    subprocess.Popen(["explorer", str(mapped_drive_path)])
-
-    file_count = sum(1 for p in mapped_drive_path.rglob("*") if p.is_file())
-
-    print(f"Total files in {mapped_drive_path}: {file_count}")
-    messagebox.showinfo(
-        "Archiving Result",
-        f"Total files in {mapped_drive_path}: {file_count}"
+    attachment_canvas.create_rectangle(
+        8,
+        8,
+        508,
+        86,
+        dash = (3, 3),
+        outline = "#9a9a9a",
+        width = 1
     )
+    attachment_canvas.create_text(
+        258,
+        47,
+        text = "Click to add or drop files",
+        fill = "#666666",
+        font = ("Segoe UI", 10)
+    )
+    attachment_canvas.bind("<Button-1>", lambda _event: pick_files())
+
+    if TkinterDnD is not None and hasattr(attachment_canvas, "drop_target_register"):
+        attachment_canvas.drop_target_register(DND_FILES)
+        attachment_canvas.dnd_bind("<<Drop>>", handle_drop)
+
+    tk.Label(
+        container,
+        text = "Selected files:",
+        font = ("Segoe UI", 10, "bold"),
+        bg = "white",
+        anchor = "w"
+    ).pack(fill = "x", pady = (0, 4))
+
+    selected_files_list.pack(fill = "x", pady = (0, 12))
+
+    top_directory_row = tk.Frame(container, bg = "white")
+    top_directory_row.pack(fill = "x", pady = (0, 10))
+
+    tk.Label(
+        top_directory_row,
+        text = "Top Directory:",
+        font = ("Segoe UI", 10),
+        bg = "white",
+        width = 15,
+        anchor = "w"
+    ).pack(side = "left")
+
+    top_directory_combo = ttk.Combobox(
+        top_directory_row,
+        textvariable = selected_directory_var,
+        width = 34,
+        state = "readonly",
+        values = default_top_directories
+    )
+    top_directory_combo.pack(side = "left", fill = "x", expand = True)
+
+    subdirectory_row = tk.Frame(container, bg = "white")
+    subdirectory_row.pack(fill = "x", pady = (0, 10))
+
+    tk.Label(
+        subdirectory_row,
+        text = "Subdirectory:",
+        font = ("Segoe UI", 10),
+        bg = "white",
+        width = 15,
+        anchor = "w"
+    ).pack(side = "left")
+
+    subdirectory_combo = ttk.Combobox(
+        subdirectory_row,
+        textvariable = selected_subdirectory_var,
+        width = 22,
+        values = []
+    )
+    subdirectory_combo.pack(side = "left")
+
+    tk.Label(
+        subdirectory_row,
+        text = "or type new subfolder",
+        font = ("Segoe UI", 9),
+        bg = "white",
+        fg = "#666666"
+    ).pack(side = "left", padx = (8, 0))
+
+    preview_frame = tk.Frame(container, bg = "white")
+    preview_frame.pack(fill = "x", pady = (0, 10))
+
+    tk.Label(
+        preview_frame,
+        text = "Destination Preview:",
+        font = ("Segoe UI", 10),
+        bg = "white",
+        anchor = "w"
+    ).pack(fill = "x")
+
+    tk.Label(
+        preview_frame,
+        textvariable = destination_preview_var,
+        font = ("Segoe UI", 10),
+        bg = "white",
+        fg = "#333333",
+        anchor = "w"
+    ).pack(fill = "x", pady = (2, 0))
+
+    tk.Button(
+        container,
+        text = "Archive Files",
+        width = 24,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = lambda: None
+    ).pack(pady = (6, 10))
+
+    tk.Label(
+        container,
+        text = "Status:",
+        font = ("Segoe UI", 10),
+        bg = "white",
+        anchor = "w"
+    ).pack(fill = "x")
+
+    tk.Label(
+        container,
+        textvariable = status_var,
+        font = ("Segoe UI", 10),
+        bg = "white",
+        fg = "#666666",
+        anchor = "w"
+    ).pack(fill = "x", pady = (2, 0))
+
+    selected_directory_var.trace_add("write", update_preview_and_status)
+    selected_subdirectory_var.trace_add("write", update_preview_and_status)
+    top_directory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
+    subdirectory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
+    update_preview_and_status()
 
 def admin(root, on_path_changed):
 
@@ -800,8 +1168,7 @@ def admin(root, on_path_changed):
     ).pack(pady = 6)
 
 def main():
-
-    root = tk.Tk()
+    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
     root.title("Applemango Archiver")
     root.geometry("360x540")
     root.configure(bg = "white")
