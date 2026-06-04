@@ -390,20 +390,12 @@ def show_mapped_drives_window(root):
         cursor="hand2"
     ).pack(side="left")
 
-def map_network_drive(root, on_drive_changed):
-    global session_logged_in, session_username, session_password
+def discover_server_shares(server_name):
+    shares = get_server_share_names(server_name) or []
 
-    if not session_logged_in:
-        messagebox.showerror("Login Required", "Please log in first.")
-        return
-
-    # 1) Discover shares on the configured server (Unicode-safe first path)
-    shares = get_server_share_names(default_server_name) or []
-
-    # Secondary path: filesystem enumeration.
     if not shares:
         try:
-            server_root = Path(default_server_name)
+            server_root = Path(server_name)
             for child in server_root.iterdir():
                 name = child.name
                 if name and not name.endswith("$"):
@@ -411,45 +403,46 @@ def map_network_drive(root, on_drive_changed):
         except OSError:
             shares = []
 
-    # Final fallback to net view parsing if API and UNC listing fail.
     if not shares:
-        shares_result = run_net_command(f"net view {default_server_name}")
+        shares_result = run_net_command(f"net view {server_name}")
 
-        if shares_result.returncode != 0:
-            messagebox.showerror(
-                "Share Discovery Failed",
-                shares_result.stderr.strip() or shares_result.stdout.strip() or "Unable to list shares."
-            )
-            return
+        if shares_result.returncode == 0:
+            in_table = False
+            header_skipped = False
+            for raw_line in shares_result.stdout.splitlines():
+                line = raw_line.rstrip()
+                stripped = line.strip()
 
-        in_table = False
-        header_skipped = False
-        for raw_line in shares_result.stdout.splitlines():
-            line = raw_line.rstrip()
-            stripped = line.strip()
+                if not stripped:
+                    continue
 
-            if not stripped:
-                continue
+                if not in_table:
+                    if set(stripped) == {"-"}:
+                        in_table = True
+                        header_skipped = False
+                    continue
 
-            if not in_table:
-                if set(stripped) == {"-"}:
-                    in_table = True
-                    header_skipped = False
-                continue
+                if stripped.lower().startswith("the command completed"):
+                    break
 
-            if stripped.lower().startswith("the command completed"):
-                break
+                if not header_skipped:
+                    header_skipped = True
+                    continue
 
-            if not header_skipped:
-                header_skipped = True
-                continue
+                cols = re.split(r"\s{2,}", stripped)
+                if cols:
+                    shares.append(cols[0])
 
-            cols = re.split(r"\s{2,}", stripped)
-            if cols:
-                shares.append(cols[0])
+    return list(dict.fromkeys(shares))
 
-    # Remove duplicates while preserving order.
-    shares = list(dict.fromkeys(shares))
+def map_network_drive(root, on_drive_changed):
+    global session_logged_in, session_username, session_password
+
+    if not session_logged_in:
+        messagebox.showerror("Login Required", "Please log in first.")
+        return
+
+    shares = discover_server_shares(default_server_name)
 
     mapped_entries = get_mapped_network_drives() or []
     mapped_share_names = set()
@@ -799,6 +792,10 @@ def unmap_network_drive(root, on_drive_changed):
     validate_unmap_selection()
 
 def run_archiver(root):
+    if not session_logged_in:
+        messagebox.showerror("Login Required", "Please log in first.", parent = root)
+        return
+
     archiver_window = tk.Toplevel(root)
     archiver_window.title("Run Archiver")
     archiver_window.geometry("560x680")
@@ -807,18 +804,11 @@ def run_archiver(root):
     archiver_window.grab_set()
 
     selected_files = []
-    selected_directory_var = tk.StringVar(value = "사단법인 애플망고러브트리")
+    top_directories = discover_server_shares(default_server_name)
+    selected_directory_var = tk.StringVar(value = "")
     selected_subdirectory_var = tk.StringVar(value = "")
     destination_preview_var = tk.StringVar()
     status_var = tk.StringVar(value = "0 files ready")
-
-    default_top_directories = [
-        "사단법인 애플망고러브트리",
-        "애플망고 선교회",
-        "주식회사 히즈컴",
-        "필레오 기독국제학교",
-        "한소망교회"
-    ]
 
     container = tk.Frame(archiver_window, bg = "white", padx = 18, pady = 16)
     container.pack(fill = "both", expand = True)
@@ -829,13 +819,42 @@ def run_archiver(root):
     selected_files_list = tk.Frame(container, bg = "white")
 
     def update_preview_and_status(*_):
+        topdir = selected_directory_var.get().strip()
         subdir = selected_subdirectory_var.get().strip()
-        preview_parts = [get_drive_target(), "Archive", selected_directory_var.get().strip()]
+        preview_parts = [get_drive_target(), "Archive"]
+        if topdir:
+            preview_parts.append(topdir)
         if subdir:
             preview_parts.append(subdir)
         preview_parts.append(str(date.today().year))
         destination_preview_var.set("/".join(preview_parts) + "/")
         status_var.set(f"{len(selected_files)} files ready")
+
+    def get_share_subdirectories(share_name):
+        cleaned_share = share_name.strip()
+        if not cleaned_share:
+            return []
+
+        share_root = Path(fr"{default_server_name}\{cleaned_share}")
+        try:
+            subdirs = [child.name for child in share_root.iterdir() if child.is_dir()]
+        except OSError:
+            return []
+
+        return sorted(subdirs, key = str.casefold)
+
+    def refresh_subdirectory_options(*_):
+        selected_share = selected_directory_var.get().strip()
+        selected_subdirectory_var.set("")
+
+        if not selected_share:
+            subdirectory_combo.config(values = [], state = "disabled")
+            update_preview_and_status()
+            return
+
+        subdirs = get_share_subdirectories(selected_share)
+        subdirectory_combo.config(values = subdirs, state = "readonly")
+        update_preview_and_status()
 
     def remove_selected_file(file_path):
         if file_path in selected_files:
@@ -1025,7 +1044,7 @@ def run_archiver(root):
         textvariable = selected_directory_var,
         width = 34,
         state = "readonly",
-        values = default_top_directories
+        values = top_directories
     )
     top_directory_combo.pack(side = "left", fill = "x", expand = True)
 
@@ -1045,7 +1064,8 @@ def run_archiver(root):
         subdirectory_row,
         textvariable = selected_subdirectory_var,
         width = 22,
-        values = []
+        values = [],
+        state = "disabled"
     )
     subdirectory_combo.pack(side = "left")
 
@@ -1109,10 +1129,11 @@ def run_archiver(root):
         anchor = "w"
     ).pack(fill = "x", pady = (2, 0))
 
-    selected_directory_var.trace_add("write", update_preview_and_status)
+    selected_directory_var.trace_add("write", refresh_subdirectory_options)
     selected_subdirectory_var.trace_add("write", update_preview_and_status)
-    top_directory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
+    top_directory_combo.bind("<<ComboboxSelected>>", refresh_subdirectory_options)
     subdirectory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
+    refresh_subdirectory_options()
     update_preview_and_status()
 
 def admin(root, on_path_changed):
@@ -1167,9 +1188,74 @@ def admin(root, on_path_changed):
         command = change_server_name
     ).pack(pady = 6)
 
+    tk.Button(
+        admin_window,
+        text = "Map Network Drive",
+        width = 24,
+        height = 2,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = lambda: map_network_drive(admin_window)
+    ).pack(pady = 6)
+
+    tk.Button(
+        admin_window,
+        text = "Unmap Network Drive",
+        width = 24,
+        height = 2,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = lambda: unmap_network_drive(admin_window)
+    ).pack(pady = 6)
+
+    tk.Button(
+        admin_window,
+        text = "Show Mapped Drive(s)",
+        width = 24,
+        height = 2,
+        bg = "#d9d9d9",
+        activebackground = "#c0c0c0",
+        fg = "black",
+        activeforeground = "black",
+        relief = "flat",
+        bd = 0,
+        highlightthickness = 0,
+        cursor = "hand2",
+        command = lambda: show_mapped_drives(admin_window)
+    ).pack(pady = 6)
+
 def main():
     root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
-    root.title("Applemango Archiver")
+    root.title("Applemango Archiver Login")
+    root.geometry("360x540")
+    root.configure(bg = "white")
+    root.resizable(False, False)
+
+    # connect to server / verify login credential
+    global session_logged_in, session_account_name, session_password
+
+    if not session_logged_in:
+        error_message = "Not logged in. Please log in to continue."
+        messagebox.showerror("Login Required", error_message, parent = root)
+        return
+
+    messagebox.showinfo("Connected to Server", f"Connected to server: {default_server_name}", parent = root)
+    
+    root.destroy()
+    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
+    root.title("Archiver Window")
     root.geometry("360x540")
     root.configure(bg = "white")
     root.resizable(False, False)
@@ -1177,6 +1263,7 @@ def main():
     container = tk.Frame(root, padx = 20, pady = 20, bg = "white")
     container.pack(expand = True, fill = "both")
 
+    # status labels
     login_status_var = tk.StringVar(value = "")
     network_var = tk.StringVar(value = get_network_info_text())
 
@@ -1259,70 +1346,6 @@ def main():
 
     refresh_login_status_label()
     refresh_auth_button()
-
-    tk.Button(
-        container,
-        text = "Map Network Drive",
-        width = 28,
-        height = 2,
-        bg = "#d9d9d9",
-        activebackground = "#c0c0c0",
-        fg = "black",
-        activeforeground = "black",
-        relief = "flat",
-        bd = 0,
-        highlightthickness = 0,
-        cursor = "hand2",
-        command = lambda: map_network_drive(root, refresh_labels)
-    ).pack(pady = 6)
-    
-    tk.Button(
-        container,
-        text = "Unmap Network Drive",
-        width = 28,
-        height = 2,
-        bg = "#d9d9d9",
-        activebackground = "#c0c0c0",
-        fg = "black",
-        activeforeground = "black",
-        relief = "flat",
-        bd = 0,
-        highlightthickness = 0,
-        cursor = "hand2",
-        command = lambda: unmap_network_drive(root, refresh_labels)
-    ).pack(pady = 6)
-
-    tk.Button(
-        container,
-        text = "Show Mapped Drive(s)",
-        width = 28,
-        height = 2,
-        bg = "#d9d9d9",
-        activebackground = "#c0c0c0",
-        fg = "black",
-        activeforeground = "black",
-        relief = "flat",
-        bd = 0,
-        highlightthickness = 0,
-        cursor = "hand2",
-        command = lambda: show_mapped_drives_window(root)
-    ).pack(pady = 6)
-
-    tk.Button(
-        container,
-        text = "Run Archiver",
-        width = 28,
-        height = 2,
-        bg = "#d9d9d9",
-        activebackground = "#c0c0c0",
-        fg = "black",
-        activeforeground = "black",
-        relief = "flat",
-        bd = 0,
-        highlightthickness = 0,
-        cursor = "hand2",
-        command = lambda: run_archiver(root)
-    ).pack(pady = 6)
 
     tk.Button(
         container,
