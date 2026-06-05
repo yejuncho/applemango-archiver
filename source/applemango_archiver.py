@@ -1,5 +1,7 @@
 import re
+import json
 import importlib
+import socket
 import ctypes
 import tkinter as tk
 from tkinter import ttk
@@ -24,6 +26,8 @@ session_logged_in = False
 session_username = ""
 session_password = ""
 session_account_name = ""
+active_workspace = ""
+credential_store_path = Path.home() / ".applemango_archiver_credentials.json"
 
 def get_drive_target():
     return f"{default_drive_letter.strip().upper().rstrip(':')}:"
@@ -144,6 +148,95 @@ def get_network_info_text():
                 ssid = found_ssid
 
     return f"IP: {ip_addr}    SSID: {ssid}"
+
+def get_server_ip(server_name):
+    normalized_server = server_name.strip().lstrip("\\")
+    if not normalized_server:
+        return "Unavailable"
+
+    try:
+        return socket.gethostbyname(normalized_server)
+    except OSError:
+        return "Unavailable"
+
+def check_server_availability(server_name):
+    normalized_server = server_name.strip().lstrip("\\")
+    if not normalized_server:
+        return False, "Unavailable"
+
+    ip_addr = get_server_ip(server_name)
+    ping_result = subprocess.run(
+        ["ping", "-n", "1", normalized_server],
+        capture_output=True,
+        text=True
+    )
+
+    is_available = ping_result.returncode == 0
+    return is_available, ip_addr
+
+def load_saved_credentials():
+    if not credential_store_path.exists():
+        return None
+
+    try:
+        payload = json.loads(credential_store_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if not username or not password:
+        return None
+
+    return {"username": username, "password": password}
+
+def save_credentials(username, password):
+    payload = {"username": username.strip(), "password": password}
+    credential_store_path.write_text(json.dumps(payload), encoding="utf-8")
+
+def clear_saved_credentials():
+    if credential_store_path.exists():
+        try:
+            credential_store_path.unlink()
+        except OSError:
+            pass
+
+def authenticate_to_server(username, password):
+    subprocess.run(
+        ["net", "use", fr"{default_server_name}\IPC$", "/delete", "/y"],
+        capture_output=True,
+        text=True
+    )
+
+    login_cmd = [
+        "net", "use",
+        fr"{default_server_name}\IPC$",
+        password,
+        f"/user:{username}",
+        "/persistent:no"
+    ]
+    login_result = subprocess.run(login_cmd, capture_output=True, text=True)
+    if login_result.returncode == 0:
+        return True, ""
+
+    err = login_result.stderr.strip() or login_result.stdout.strip() or "Unknown error"
+    return False, err
+
+def update_session_login(username, password):
+    global session_logged_in, session_username, session_password, session_account_name
+
+    session_logged_in = True
+    session_username = username.strip()
+    session_password = password
+    session_account_name = extract_account_name(username)
+
+def clear_session_login():
+    global session_logged_in, session_username, session_password, session_account_name
+
+    session_logged_in = False
+    session_username = ""
+    session_password = ""
+    session_account_name = ""
 
 def get_server_share_names(server_name):
     normalized_server = server_name.strip().lstrip("\\")
@@ -1233,137 +1326,542 @@ def admin(root, on_path_changed):
         bd = 0,
         highlightthickness = 0,
         cursor = "hand2",
-        command = lambda: show_mapped_drives(admin_window)
+        command = lambda: show_mapped_drives_window(admin_window)
     ).pack(pady = 6)
 
-def main():
-    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
-    root.title("Applemango Archiver Login")
-    root.geometry("360x540")
-    root.configure(bg = "white")
-    root.resizable(False, False)
+class SequenceArchiverApp:
+    def __init__(self):
+        self.root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
+        self.root.geometry("620x740")
+        self.root.configure(bg="white")
+        self.root.resizable(False, False)
 
-    # connect to server / verify login credential
-    global session_logged_in, session_account_name, session_password
-
-    if not session_logged_in:
-        error_message = "Not logged in. Please log in to continue."
-        messagebox.showerror("Login Required", error_message, parent = root)
-        return
-
-    messagebox.showinfo("Connected to Server", f"Connected to server: {default_server_name}", parent = root)
-    
-    root.destroy()
-    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
-    root.title("Archiver Window")
-    root.geometry("360x540")
-    root.configure(bg = "white")
-    root.resizable(False, False)
-
-    container = tk.Frame(root, padx = 20, pady = 20, bg = "white")
-    container.pack(expand = True, fill = "both")
-
-    # status labels
-    login_status_var = tk.StringVar(value = "")
-    network_var = tk.StringVar(value = get_network_info_text())
-
-    status_font = ("Segoe UI", 10)
-    status_line_pady = (3, 3)
-
-    auth_button_frame = tk.Frame(container, bg = "white")
-    auth_button_frame.pack(fill = "x", pady = (0, 4))
-
-    tk.Label(
-        container,
-        text  = "APPLEMANGO ARCHIVER",
-        font = ("Segoe UI", 12, "bold"),
-        bg = "white"
-    ).pack(pady = (0, 10))
-
-    status_box = tk.LabelFrame(
-        container,
-        text = "Status",
-        bg = "white",
-        padx = 12,
-        pady = 8,
-        labelanchor = "n"
-    )
-    status_box.pack(fill = "x", pady = (0, 12))
-
-    login_status_label = tk.Label(status_box, textvariable = login_status_var, font = status_font, bg = "white", anchor = "center", justify = "center")
-    network_label = tk.Label(status_box, textvariable = network_var, font = status_font, bg = "white", anchor = "center", justify = "center")
-
-    path_var = tk.StringVar()
-
-    path_label = tk.Label(status_box, textvariable = path_var, font = status_font, bg = "white", anchor = "center", justify = "center")
-
-    def refresh_login_status_label():
-        if session_logged_in and session_account_name:
-            login_status_var.set(f"Logged in as {session_account_name}")
-            if not login_status_label.winfo_ismapped():
-                login_status_label.pack(fill = "x", pady = status_line_pady)
-        else:
-            login_status_var.set("")
-            if login_status_label.winfo_ismapped():
-                login_status_label.pack_forget()
-
-    network_label.pack(fill = "x", pady = status_line_pady)
-    path_label.pack(fill = "x", pady = status_line_pady)
-
-    def refresh_path_label():
-        path_var.set("Current Server Name: " + default_server_name)
-    def refresh_labels():
-        network_var.set(get_network_info_text())
-        refresh_path_label()
-
-    refresh_labels()
-
-    def refresh_auth_button():
-        for child in auth_button_frame.winfo_children():
+    def clear_screen(self):
+        for child in self.root.winfo_children():
             child.destroy()
 
-        if session_logged_in:
-            button_text = "Logout"
-            button_command = lambda: logout_from_server(root, refresh_labels, refresh_auth_button, refresh_login_status_label)
-        else:
-            button_text = "Login"
-            button_command = lambda: login_to_server(root, refresh_labels, refresh_auth_button, refresh_login_status_label)
+    def get_connection_snapshot(self):
+        is_connected, ip_addr = check_server_availability(default_server_name)
+        status_text = "Connected" if is_connected else "Unavailable"
+        return is_connected, ip_addr, status_text
+
+    def show_startup_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Startup")
+        self.clear_screen()
+
+        _, ip_addr, status_text = self.get_connection_snapshot()
+
+        container = tk.Frame(self.root, padx=24, pady=28, bg="white")
+        container.pack(fill="both", expand=True)
+
+        tk.Label(
+            container,
+            text="APPLEMANGO ARCHIVER",
+            font=("Segoe UI", 16, "bold"),
+            bg="white"
+        ).pack(pady=(0, 20))
+
+        status_box = tk.LabelFrame(
+            container,
+            text="Server Status",
+            bg="white",
+            padx=16,
+            pady=12
+        )
+        status_box.pack(fill="x")
+
+        tk.Label(status_box, text=f"Server Name: {default_server_name}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
+        tk.Label(status_box, text=f"IP Address: {ip_addr}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
+        tk.Label(status_box, text=f"Connection Status: {status_text}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
+
+        tk.Label(
+            container,
+            text="Checking saved credentials...",
+            font=("Segoe UI", 10),
+            bg="white",
+            fg="#666666"
+        ).pack(pady=(12, 0), anchor="w")
+
+        self.root.after(350, self.route_from_startup)
+
+    def route_from_startup(self):
+        saved = load_saved_credentials()
+        if not saved:
+            self.show_login_screen()
+            return
+
+        ok, _ = authenticate_to_server(saved["username"], saved["password"])
+        if ok:
+            update_session_login(saved["username"], saved["password"])
+            self.show_workspace_selection_screen()
+            return
+
+        clear_saved_credentials()
+        clear_session_login()
+        self.show_login_screen()
+
+    def show_login_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Login")
+        self.clear_screen()
+
+        container = tk.Frame(self.root, padx=24, pady=28, bg="white")
+        container.pack(fill="both", expand=True)
+
+        tk.Label(container, text="APPLEMANGO ARCHIVER", font=("Segoe UI", 16, "bold"), bg="white").pack(pady=(0, 18))
+        tk.Label(container, text="Login", font=("Segoe UI", 12, "bold"), bg="white").pack(anchor="w", pady=(0, 8))
+
+        username_var = tk.StringVar(value=session_username)
+        password_var = tk.StringVar()
+        remember_var = tk.BooleanVar(value=load_saved_credentials() is not None)
+
+        tk.Label(container, text="Username", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(8, 2))
+        tk.Entry(container, textvariable=username_var, font=("Segoe UI", 10)).pack(fill="x")
+
+        tk.Label(container, text="Password", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(10, 2))
+        tk.Entry(container, textvariable=password_var, show="*", font=("Segoe UI", 10)).pack(fill="x")
+
+        tk.Checkbutton(
+            container,
+            text="Remember Credentials",
+            variable=remember_var,
+            bg="white",
+            activebackground="white"
+        ).pack(anchor="w", pady=(10, 12))
+
+        button_row = tk.Frame(container, bg="white")
+        button_row.pack(fill="x")
+
+        def submit_login():
+            username = username_var.get().strip()
+            password = password_var.get()
+            if not username or not password:
+                messagebox.showerror("Login", "Username and password are required.", parent=self.root)
+                return
+
+            ok, err = authenticate_to_server(username, password)
+            if not ok:
+                clear_session_login()
+                messagebox.showerror("Login Failed", err, parent=self.root)
+                return
+
+            update_session_login(username, password)
+            if remember_var.get():
+                save_credentials(username, password)
+            else:
+                clear_saved_credentials()
+
+            self.show_workspace_selection_screen()
 
         tk.Button(
-            auth_button_frame,
-            text = button_text,
-            width = 10,
-            bg = "#d9d9d9",
-            activebackground = "#c0c0c0",
-            fg = "black",
-            activeforeground = "black",
-            relief = "flat",
-            bd = 0,
-            highlightthickness = 0,
-            cursor = "hand2",
-            command = button_command
-        ).pack(anchor = "e")
+            button_row,
+            text="Login",
+            width=18,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=submit_login
+        ).pack(side="left")
 
-    refresh_login_status_label()
-    refresh_auth_button()
+        tk.Button(
+            button_row,
+            text="Exit",
+            width=18,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.root.destroy
+        ).pack(side="left", padx=(8, 0))
 
-    tk.Button(
-        container,
-        text = "Settings",
-        width = 28,
-        height = 2,
-        bg = "#d9d9d9",
-        activebackground = "#c0c0c0",
-        fg = "black",
-        activeforeground = "black",
-        relief = "flat",
-        bd = 0,
-        highlightthickness = 0,
-        cursor = "hand2",
-        command = lambda: admin(root, refresh_labels)
-    ).pack(pady = 6)
+    def open_settings_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Settings")
+        dialog.geometry("360x140")
+        dialog.configure(bg="white")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
 
-    root.mainloop()
+        tk.Label(dialog, text=f"Current Server: {default_server_name}", font=("Segoe UI", 10), bg="white").pack(pady=(16, 10))
+
+        def change_server_name():
+            global default_server_name
+
+            new_name = simpledialog.askstring(
+                "Change Server Name",
+                "Enter new server name:",
+                parent=dialog,
+                initialvalue=default_server_name.lstrip("\\")
+            )
+            if not new_name:
+                return
+
+            cleaned_name = new_name.strip().lstrip("\\")
+            if not cleaned_name:
+                return
+
+            default_server_name = f"\\\\{cleaned_name}"
+            messagebox.showinfo("Settings", f"Server changed to {default_server_name}", parent=dialog)
+            dialog.destroy()
+            self.show_workspace_selection_screen()
+
+        tk.Button(
+            dialog,
+            text="Change Server Name",
+            width=24,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=change_server_name
+        ).pack()
+
+    def show_workspace_selection_screen(self):
+        global active_workspace
+
+        self.root.title("APPLEMANGO ARCHIVER - Workspace Selection")
+        self.clear_screen()
+
+        _, ip_addr, status_text = self.get_connection_snapshot()
+        shares = discover_server_shares(default_server_name)
+
+        container = tk.Frame(self.root, padx=24, pady=28, bg="white")
+        container.pack(fill="both", expand=True)
+
+        tk.Label(container, text="Workspace Selection", font=("Segoe UI", 14, "bold"), bg="white").pack(anchor="w", pady=(0, 12))
+        tk.Label(container, text=f"Server: {default_server_name}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(container, text=f"IP Address: {ip_addr}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(container, text=f"Connection Status: {status_text}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(0, 12))
+
+        workspace_var = tk.StringVar(value=active_workspace if active_workspace in shares else "")
+
+        tk.Label(container, text="Select Workspace", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(10, 4))
+        workspace_combo = ttk.Combobox(container, textvariable=workspace_var, values=shares, state="readonly", width=48)
+        workspace_combo.pack(fill="x")
+
+        if shares and not workspace_var.get():
+            workspace_combo.current(0)
+
+        button_row = tk.Frame(container, bg="white")
+        button_row.pack(fill="x", pady=(16, 0))
+
+        def enter_workspace():
+            global active_workspace
+
+            selected = workspace_var.get().strip()
+            if not selected:
+                messagebox.showerror("Workspace", "Please select a workspace.", parent=self.root)
+                return
+
+            active_workspace = selected
+            messagebox.showinfo(
+                "Workspace",
+                f"Active workspace set to '{active_workspace}'.\nShared folder mapping simulated.",
+                parent=self.root
+            )
+            self.show_main_archiver_screen()
+
+        tk.Button(
+            button_row,
+            text="Enter Workspace",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=enter_workspace
+        ).pack(side="left")
+
+        tk.Button(
+            button_row,
+            text="Settings",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.open_settings_dialog
+        ).pack(side="left", padx=(8, 0))
+
+    def build_archiver_panel(self, parent):
+        selected_files = []
+        selected_subdirectory_var = tk.StringVar(value="")
+        destination_preview_var = tk.StringVar()
+        status_var = tk.StringVar(value="0 files ready")
+
+        container = tk.Frame(parent, bg="white", padx=18, pady=16)
+        container.pack(fill="both", expand=True)
+
+        button_row = tk.Frame(container, bg="white")
+        button_row.pack(fill="x", pady=(0, 10))
+
+        selected_files_list = tk.Frame(container, bg="white")
+
+        def update_preview_and_status(*_):
+            subdir = selected_subdirectory_var.get().strip()
+            preview_parts = [default_server_name, active_workspace]
+            if subdir:
+                preview_parts.append(subdir)
+            preview_parts.append(str(date.today().year))
+            destination_preview_var.set("/".join(preview_parts) + "/")
+            status_var.set(f"{len(selected_files)} files ready")
+
+        def get_workspace_subdirectories():
+            if not active_workspace:
+                return []
+
+            workspace_root = Path(fr"{default_server_name}\{active_workspace}")
+            try:
+                subdirs = [child.name for child in workspace_root.iterdir() if child.is_dir()]
+            except OSError:
+                return []
+
+            return sorted(subdirs, key=str.casefold)
+
+        def remove_selected_file(file_path):
+            if file_path in selected_files:
+                selected_files.remove(file_path)
+                refresh_selected_files_view()
+
+        def refresh_selected_files_view():
+            for child in selected_files_list.winfo_children():
+                child.destroy()
+
+            for file_path in selected_files:
+                row = tk.Frame(selected_files_list, bg="white")
+                row.pack(fill="x", pady=1)
+
+                tk.Label(
+                    row,
+                    text=f"- {Path(file_path).name}",
+                    font=("Segoe UI", 9),
+                    bg="white",
+                    fg="#333333",
+                    anchor="w",
+                    justify="left"
+                ).pack(side="left", fill="x", expand=True)
+
+                tk.Button(
+                    row,
+                    text="x",
+                    width=2,
+                    bg="white",
+                    activebackground="#efefef",
+                    fg="#666666",
+                    relief="flat",
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                    command=lambda p=file_path: remove_selected_file(p)
+                ).pack(side="right")
+
+            update_preview_and_status()
+
+        def add_file_paths(paths):
+            normalized_paths = []
+            for raw_path in paths:
+                candidate = str(raw_path).strip().strip("{}")
+                if candidate and Path(candidate).is_file():
+                    normalized_paths.append(str(Path(candidate)))
+
+            if not normalized_paths:
+                return
+
+            seen = set(selected_files)
+            for file_path in normalized_paths:
+                if file_path not in seen:
+                    selected_files.append(file_path)
+                    seen.add(file_path)
+
+            refresh_selected_files_view()
+
+        def add_folder_paths(folder_paths):
+            discovered_files = []
+            for raw_folder in folder_paths:
+                folder_candidate = str(raw_folder).strip().strip("{}")
+                folder_path = Path(folder_candidate)
+                if folder_candidate and folder_path.is_dir():
+                    discovered_files.extend(str(p) for p in folder_path.rglob("*") if p.is_file())
+
+            add_file_paths(discovered_files)
+
+        def pick_files():
+            files = filedialog.askopenfilenames(parent=self.root, title="Add files")
+            if files:
+                add_file_paths(files)
+
+        def pick_folder():
+            folder = filedialog.askdirectory(parent=self.root, title="Add folder")
+            if folder:
+                add_folder_paths([folder])
+
+        def handle_drop(event):
+            dropped_items = self.root.tk.splitlist(event.data)
+            file_items = []
+            folder_items = []
+
+            for item in dropped_items:
+                normalized_item = str(item).strip().strip("{}")
+                if not normalized_item:
+                    continue
+                path_obj = Path(normalized_item)
+                if path_obj.is_file():
+                    file_items.append(normalized_item)
+                elif path_obj.is_dir():
+                    folder_items.append(normalized_item)
+
+            if file_items:
+                add_file_paths(file_items)
+            if folder_items:
+                add_folder_paths(folder_items)
+
+            return event.action if hasattr(event, "action") else None
+
+        tk.Button(
+            button_row,
+            text="Add Files",
+            width=16,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            fg="black",
+            activeforeground="black",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=pick_files
+        ).pack(side="left")
+
+        tk.Button(
+            button_row,
+            text="Add Folder",
+            width=16,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            fg="black",
+            activeforeground="black",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=pick_folder
+        ).pack(side="left", padx=(8, 0))
+
+        attachment_canvas = tk.Canvas(
+            container,
+            height=94,
+            bg="white",
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2"
+        )
+        attachment_canvas.pack(fill="x", pady=(0, 12))
+
+        attachment_canvas.create_rectangle(8, 8, 538, 86, dash=(3, 3), outline="#9a9a9a", width=1)
+        attachment_canvas.create_text(273, 47, text="Click to add or drop files", fill="#666666", font=("Segoe UI", 10))
+        attachment_canvas.bind("<Button-1>", lambda _event: pick_files())
+
+        if TkinterDnD is not None and hasattr(attachment_canvas, "drop_target_register"):
+            attachment_canvas.drop_target_register(DND_FILES)
+            attachment_canvas.dnd_bind("<<Drop>>", handle_drop)
+
+        tk.Label(container, text="Selected files:", font=("Segoe UI", 10, "bold"), bg="white", anchor="w").pack(fill="x", pady=(0, 4))
+        selected_files_list.pack(fill="x", pady=(0, 12))
+
+        subdirectory_row = tk.Frame(container, bg="white")
+        subdirectory_row.pack(fill="x", pady=(0, 10))
+
+        tk.Label(subdirectory_row, text="Subdirectory:", font=("Segoe UI", 10), bg="white", width=15, anchor="w").pack(side="left")
+
+        subdirectory_combo = ttk.Combobox(
+            subdirectory_row,
+            textvariable=selected_subdirectory_var,
+            width=30,
+            values=get_workspace_subdirectories(),
+            state="readonly"
+        )
+        subdirectory_combo.pack(side="left")
+
+        tk.Label(subdirectory_row, text="or type new subfolder", font=("Segoe UI", 9), bg="white", fg="#666666").pack(side="left", padx=(8, 0))
+
+        preview_frame = tk.Frame(container, bg="white")
+        preview_frame.pack(fill="x", pady=(0, 10))
+
+        tk.Label(preview_frame, text="Destination Preview:", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(preview_frame, textvariable=destination_preview_var, font=("Segoe UI", 10), bg="white", fg="#333333", anchor="w").pack(fill="x", pady=(2, 0))
+
+        tk.Button(
+            container,
+            text="Archive Files",
+            width=24,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            fg="black",
+            activeforeground="black",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=lambda: None
+        ).pack(pady=(6, 10))
+
+        tk.Label(container, text="Status:", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(container, textvariable=status_var, font=("Segoe UI", 10), bg="white", fg="#666666", anchor="w").pack(fill="x", pady=(2, 0))
+
+        selected_subdirectory_var.trace_add("write", update_preview_and_status)
+        subdirectory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
+        update_preview_and_status()
+
+    def show_main_archiver_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Main")
+        self.clear_screen()
+
+        _, ip_addr, status_text = self.get_connection_snapshot()
+
+        page = tk.Frame(self.root, bg="white", padx=16, pady=16)
+        page.pack(fill="both", expand=True)
+
+        header = tk.LabelFrame(page, text="Main Archiver", bg="white", padx=14, pady=10)
+        header.pack(fill="x", pady=(0, 10))
+
+        tk.Label(header, text=f"Logged-in Username: {session_account_name or session_username}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"Server Name: {default_server_name}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"IP Address: {ip_addr}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"Current Workspace: {active_workspace or 'Not selected'}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"Connection Status: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
+
+        tk.Button(
+            header,
+            text="Change Workspace",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_workspace_selection_screen
+        ).pack(anchor="e", pady=(8, 0))
+
+        body = tk.Frame(page, bg="white")
+        body.pack(fill="both", expand=True)
+        self.build_archiver_panel(body)
+
+def main():
+    app = SequenceArchiverApp()
+    app.show_startup_screen()
+    app.root.mainloop()
 
 if __name__ == "__main__":
     main()
