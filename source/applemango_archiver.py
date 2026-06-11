@@ -3,6 +3,7 @@ import json
 import importlib
 import socket
 import ctypes
+import shutil
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog, messagebox, simpledialog
@@ -10,6 +11,7 @@ import subprocess
 from datetime import date
 from ctypes import wintypes
 from pathlib import Path
+import sqlite3
 
 try:
     _tkinterdnd2 = importlib.import_module("tkinterdnd2")
@@ -1345,44 +1347,26 @@ class SequenceArchiverApp:
         status_text = "Connected" if is_connected else "Unavailable"
         return is_connected, ip_addr, status_text
 
-    def show_startup_screen(self):
-        self.root.title("APPLEMANGO ARCHIVER - Startup")
-        self.clear_screen()
+    def logout_and_return_to_login(self):
+        global active_workspace
 
-        _, ip_addr, status_text = self.get_connection_snapshot()
-
-        container = tk.Frame(self.root, padx=24, pady=28, bg="white")
-        container.pack(fill="both", expand=True)
-
-        tk.Label(
-            container,
-            text="APPLEMANGO ARCHIVER",
-            font=("Segoe UI", 16, "bold"),
-            bg="white"
-        ).pack(pady=(0, 20))
-
-        status_box = tk.LabelFrame(
-            container,
-            text="Server Status",
-            bg="white",
-            padx=16,
-            pady=12
+        subprocess.run(
+            ["net", "use", fr"{default_server_name}\IPC$", "/delete", "/y"],
+            capture_output=True,
+            text=True
         )
-        status_box.pack(fill="x")
+        clear_session_login()
+        active_workspace = ""
+        self.show_login_screen()
 
-        tk.Label(status_box, text=f"Server Name: {default_server_name}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
-        tk.Label(status_box, text=f"IP Address: {ip_addr}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
-        tk.Label(status_box, text=f"Connection Status: {status_text}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=3)
+    def leave_workspace(self):
+        global active_workspace
+        active_workspace = ""
+        self.show_main_archiver_screen()
 
-        tk.Label(
-            container,
-            text="Checking saved credentials...",
-            font=("Segoe UI", 10),
-            bg="white",
-            fg="#666666"
-        ).pack(pady=(12, 0), anchor="w")
-
-        self.root.after(350, self.route_from_startup)
+    def show_startup_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER")
+        self.route_from_startup()
 
     def route_from_startup(self):
         saved = load_saved_credentials()
@@ -1393,7 +1377,7 @@ class SequenceArchiverApp:
         ok, _ = authenticate_to_server(saved["username"], saved["password"])
         if ok:
             update_session_login(saved["username"], saved["password"])
-            self.show_workspace_selection_screen()
+            self.show_main_archiver_screen()
             return
 
         clear_saved_credentials()
@@ -1450,7 +1434,7 @@ class SequenceArchiverApp:
             else:
                 clear_saved_credentials()
 
-            self.show_workspace_selection_screen()
+            self.show_main_archiver_screen()
 
         tk.Button(
             button_row,
@@ -1477,51 +1461,6 @@ class SequenceArchiverApp:
             cursor="hand2",
             command=self.root.destroy
         ).pack(side="left", padx=(8, 0))
-
-    def open_settings_dialog(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Settings")
-        dialog.geometry("360x140")
-        dialog.configure(bg="white")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        tk.Label(dialog, text=f"Current Server: {default_server_name}", font=("Segoe UI", 10), bg="white").pack(pady=(16, 10))
-
-        def change_server_name():
-            global default_server_name
-
-            new_name = simpledialog.askstring(
-                "Change Server Name",
-                "Enter new server name:",
-                parent=dialog,
-                initialvalue=default_server_name.lstrip("\\")
-            )
-            if not new_name:
-                return
-
-            cleaned_name = new_name.strip().lstrip("\\")
-            if not cleaned_name:
-                return
-
-            default_server_name = f"\\\\{cleaned_name}"
-            messagebox.showinfo("Settings", f"Server changed to {default_server_name}", parent=dialog)
-            dialog.destroy()
-            self.show_workspace_selection_screen()
-
-        tk.Button(
-            dialog,
-            text="Change Server Name",
-            width=24,
-            bg="#d9d9d9",
-            activebackground="#c0c0c0",
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
-            cursor="hand2",
-            command=change_server_name
-        ).pack()
 
     def show_workspace_selection_screen(self):
         global active_workspace
@@ -1561,12 +1500,7 @@ class SequenceArchiverApp:
                 return
 
             active_workspace = selected
-            messagebox.showinfo(
-                "Workspace",
-                f"Active workspace set to '{active_workspace}'.\nShared folder mapping simulated.",
-                parent=self.root
-            )
-            self.show_main_archiver_screen()
+            self.show_workspace_archiver_screen()
 
         tk.Button(
             button_row,
@@ -1583,7 +1517,7 @@ class SequenceArchiverApp:
 
         tk.Button(
             button_row,
-            text="Settings",
+            text="Logout",
             width=20,
             bg="#d9d9d9",
             activebackground="#c0c0c0",
@@ -1591,8 +1525,450 @@ class SequenceArchiverApp:
             bd=0,
             highlightthickness=0,
             cursor="hand2",
-            command=self.open_settings_dialog
+            command=self.logout_and_return_to_login
         ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            button_row,
+            text="Back",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_main_archiver_screen
+        ).pack(side="left", padx=(8, 0))
+
+    def get_share_root_path(self, share_name, mapped_drive=None):
+        if mapped_drive:
+            return Path(f"{mapped_drive}\\")
+        return Path(fr"{default_server_name}\{share_name}")
+
+    def find_mapped_drive_for_share(self, share_name):
+        target_remote = fr"{default_server_name}\{share_name}".lower().rstrip("\\/")
+        entries = get_mapped_network_drives() or []
+        for drive, remote in entries:
+            if remote.lower().rstrip("\\/") == target_remote:
+                return drive
+        return None
+
+    def map_share_with_next_available_letter(self, share_name):
+        if not session_logged_in:
+            return None, "Please log in first."
+
+        existing = self.find_mapped_drive_for_share(share_name)
+        if existing:
+            return existing, ""
+
+        available_letters = get_available_mapping_letters()
+        if not available_letters:
+            return None, "No available drive letters to map this shared folder."
+
+        drive = f"{available_letters[0]}:"
+        remote_path = fr"{default_server_name}\{share_name}"
+
+        cmd = [
+            "net", "use",
+            drive,
+            remote_path,
+            session_password,
+            f"/user:{session_username}",
+            "/persistent:yes"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return drive, ""
+
+        err = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+        return None, err
+
+    def unmap_drive_letter(self, drive_letter):
+        drive = normalize_drive_letter(drive_letter or "")
+        if not drive:
+            return False, "Invalid drive letter."
+
+        result = subprocess.run(
+            ["net", "use", drive, "/delete", "/y"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            return True, ""
+
+        err = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+        return False, err
+
+    def show_archive_architecture_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Archive Architecture")
+        self.clear_screen()
+
+        _, ip_addr, status_text = self.get_connection_snapshot()
+        shares = discover_server_shares(default_server_name)
+
+        container = tk.Frame(self.root, padx=24, pady=28, bg="white")
+        container.pack(fill="both", expand=True)
+
+        tk.Label(container, text="Archive Architecture", font=("Segoe UI", 14, "bold"), bg="white").pack(anchor="w", pady=(0, 12))
+        tk.Label(container, text=f"Server: {default_server_name}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(container, text=f"IP Address: {ip_addr}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x")
+        tk.Label(container, text=f"Connection Status: {status_text}", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(0, 12))
+
+        share_var = tk.StringVar(value=shares[0] if shares else "")
+
+        tk.Label(container, text="Select Shared Folder", font=("Segoe UI", 10), bg="white", anchor="w").pack(fill="x", pady=(10, 4))
+        share_combo = ttk.Combobox(container, textvariable=share_var, values=shares, state="readonly", width=48)
+        share_combo.pack(fill="x")
+
+        button_row = tk.Frame(container, bg="white")
+        button_row.pack(fill="x", pady=(16, 0))
+
+        def open_share_tree():
+            selected_share = share_var.get().strip()
+            if not selected_share:
+                messagebox.showerror("Archive Architecture", "Please select a shared folder.", parent=self.root)
+                return
+            self.show_share_tree_screen(selected_share)
+
+        tk.Button(
+            button_row,
+            text="View Tree",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=open_share_tree
+        ).pack(side="left")
+
+        tk.Button(
+            button_row,
+            text="Back",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_main_archiver_screen
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            button_row,
+            text="Logout",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.logout_and_return_to_login
+        ).pack(side="left", padx=(8, 0))
+
+    def show_share_tree_screen(self, share_name):
+        self.root.title(f"APPLEMANGO ARCHIVER - {share_name} Tree")
+        self.clear_screen()
+
+        page = tk.Frame(self.root, bg="white", padx=16, pady=16)
+        page.pack(fill="both", expand=True)
+
+        header = tk.LabelFrame(page, text="Shared Folder Tree", bg="white", padx=14, pady=10)
+        header.pack(fill="x", pady=(0, 10))
+
+        tk.Label(header, text=f"Server: {default_server_name}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"Shared Folder: {share_name}", bg="white", anchor="w").pack(fill="x", pady=2)
+
+        mapped_drive_var = tk.StringVar(value=self.find_mapped_drive_for_share(share_name) or "")
+        status_var = tk.StringVar(value="View mode: browsing folder tree.")
+        edit_enabled = tk.BooleanVar(value=bool(mapped_drive_var.get()))
+        mapped_by_edit_mode = tk.BooleanVar(value=False)
+
+        if mapped_drive_var.get():
+            status_var.set(f"Edit mode ready via mapped drive {mapped_drive_var.get()}.")
+
+        tk.Label(header, textvariable=status_var, bg="white", fg="#666666", anchor="w").pack(fill="x", pady=(2, 0))
+
+        tree_frame = tk.Frame(page, bg="white")
+        tree_frame.pack(fill="both", expand=True)
+
+        tree = ttk.Treeview(tree_frame, columns=("path",), displaycolumns=())
+        tree.pack(fill="both", expand=True, side="left")
+
+        scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        scroll.pack(side="right", fill="y")
+        tree.configure(yscrollcommand=scroll.set)
+
+        def get_root_path():
+            return self.get_share_root_path(share_name, mapped_drive_var.get() or None)
+
+        def insert_directory_nodes(parent_item, directory_path):
+            try:
+                children = sorted(
+                    [child for child in directory_path.iterdir() if child.is_dir()],
+                    key=lambda p: p.name.casefold()
+                )
+            except OSError:
+                return
+
+            for child in children:
+                child_item = tree.insert(parent_item, "end", text=child.name, values=(str(child),))
+                insert_directory_nodes(child_item, child)
+
+        def refresh_tree():
+            tree.delete(*tree.get_children())
+            share_root = get_root_path()
+            root_item = tree.insert("", "end", text=share_name, values=(str(share_root),), open=True)
+            insert_directory_nodes(root_item, share_root)
+            tree.selection_set(root_item)
+
+        def selected_directory_path():
+            selection = tree.selection()
+            if not selection:
+                return get_root_path(), True
+
+            item_id = selection[0]
+            values = tree.item(item_id, "values")
+            if not values:
+                return get_root_path(), True
+
+            selected_path = Path(values[0])
+            is_root = selected_path.resolve() == get_root_path().resolve()
+            return selected_path, is_root
+
+        def enable_edit_actions(enabled):
+            action_state = "normal" if enabled else "disabled"
+            new_btn.config(state=action_state)
+            rename_btn.config(state=action_state)
+            delete_btn.config(state=action_state)
+
+        def enter_edit_mode():
+            was_already_mapped = bool(self.find_mapped_drive_for_share(share_name))
+            drive, err = self.map_share_with_next_available_letter(share_name)
+            if not drive:
+                messagebox.showerror("Edit Mode", f"Unable to map shared folder:\n{err}", parent=self.root)
+                return
+
+            mapped_drive_var.set(drive)
+            edit_enabled.set(True)
+            status_var.set(f"Edit mode enabled via mapped drive {drive}.")
+            mapped_by_edit_mode.set(not was_already_mapped)
+
+            mapped_message = f"Shared folder '{share_name}' mapped as {drive}/"
+            if was_already_mapped:
+                mapped_message = f"Shared folder '{share_name}' is already mapped as {drive}/"
+            messagebox.showinfo("Edit Mode", mapped_message, parent=self.root)
+
+            edit_toggle_btn.config(text="Disable Edit", command=disable_edit_mode)
+            enable_edit_actions(True)
+            refresh_tree()
+
+        def disable_edit_mode():
+            drive = mapped_drive_var.get().strip()
+
+            if mapped_by_edit_mode.get() and drive:
+                ok, err = self.unmap_drive_letter(drive)
+                if not ok:
+                    messagebox.showerror("Disable Edit", f"Unable to unmap {drive}:\n{err}", parent=self.root)
+                    return
+
+            mapped_by_edit_mode.set(False)
+            mapped_drive_var.set("")
+            edit_enabled.set(False)
+            status_var.set("View mode: browsing folder tree.")
+            edit_toggle_btn.config(text="Enable Edit", command=enter_edit_mode)
+            enable_edit_actions(False)
+            refresh_tree()
+
+        def cleanup_edit_mapping():
+            drive = mapped_drive_var.get().strip()
+            if mapped_by_edit_mode.get() and drive:
+                self.unmap_drive_letter(drive)
+            mapped_by_edit_mode.set(False)
+
+        def create_subdirectory():
+            parent_path, _ = selected_directory_path()
+            name = simpledialog.askstring("New Subdirectory", "Enter new subdirectory name:", parent=self.root)
+            if not name:
+                return
+
+            clean_name = name.strip()
+            if not clean_name:
+                return
+
+            target = parent_path / clean_name
+            if target.exists():
+                messagebox.showerror("New Subdirectory", "A directory with that name already exists.", parent=self.root)
+                return
+
+            try:
+                target.mkdir()
+            except OSError as exc:
+                messagebox.showerror("New Subdirectory", f"Failed to create directory:\n{exc}", parent=self.root)
+                return
+
+            refresh_tree()
+
+        def rename_subdirectory():
+            target_path, is_root = selected_directory_path()
+            if is_root:
+                messagebox.showerror("Rename Subdirectory", "Select a subdirectory to rename.", parent=self.root)
+                return
+
+            new_name = simpledialog.askstring("Rename Subdirectory", "Enter new name:", parent=self.root, initialvalue=target_path.name)
+            if not new_name:
+                return
+
+            clean_name = new_name.strip()
+            if not clean_name:
+                return
+
+            destination = target_path.parent / clean_name
+            if destination.exists():
+                messagebox.showerror("Rename Subdirectory", "A directory with that name already exists.", parent=self.root)
+                return
+
+            try:
+                target_path.rename(destination)
+            except OSError as exc:
+                messagebox.showerror("Rename Subdirectory", f"Failed to rename directory:\n{exc}", parent=self.root)
+                return
+
+            refresh_tree()
+
+        def delete_subdirectory():
+            target_path, is_root = selected_directory_path()
+            if is_root:
+                messagebox.showerror("Delete Subdirectory", "Select a subdirectory to delete.", parent=self.root)
+                return
+
+            proceed = messagebox.askyesno(
+                "Delete Subdirectory",
+                f"Delete '{target_path.name}' and all nested subdirectories?",
+                parent=self.root
+            )
+            if not proceed:
+                return
+
+            try:
+                shutil.rmtree(target_path)
+            except OSError as exc:
+                messagebox.showerror("Delete Subdirectory", f"Failed to delete directory:\n{exc}", parent=self.root)
+                return
+
+            refresh_tree()
+
+        action_row = tk.Frame(page, bg="white")
+        action_row.pack(fill="x", pady=(10, 0))
+
+        edit_toggle_btn = tk.Button(
+            action_row,
+            text="Enable Edit",
+            width=14,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=enter_edit_mode
+        )
+        edit_toggle_btn.pack(side="left")
+
+        new_btn = tk.Button(
+            action_row,
+            text="New Subdir",
+            width=14,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=create_subdirectory
+        )
+        new_btn.pack(side="left", padx=(8, 0))
+
+        rename_btn = tk.Button(
+            action_row,
+            text="Rename",
+            width=14,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=rename_subdirectory
+        )
+        rename_btn.pack(side="left", padx=(8, 0))
+
+        delete_btn = tk.Button(
+            action_row,
+            text="Delete",
+            width=14,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=delete_subdirectory
+        )
+        delete_btn.pack(side="left", padx=(8, 0))
+
+        nav_row = tk.Frame(page, bg="white")
+        nav_row.pack(fill="x", pady=(10, 0))
+
+        tk.Button(
+            nav_row,
+            text="Back to Shared Folders",
+            width=24,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=lambda: (cleanup_edit_mapping(), self.show_archive_architecture_screen())
+        ).pack(side="left")
+
+        tk.Button(
+            nav_row,
+            text="Back to Main",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=lambda: (cleanup_edit_mapping(), self.show_main_archiver_screen())
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            nav_row,
+            text="Logout",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=lambda: (cleanup_edit_mapping(), self.logout_and_return_to_login())
+        ).pack(side="left", padx=(8, 0))
+
+        if edit_enabled.get():
+            edit_toggle_btn.config(text="Disable Edit", command=disable_edit_mode)
+
+        enable_edit_actions(edit_enabled.get())
+        refresh_tree()
 
     def build_archiver_panel(self, parent):
         selected_files = []
@@ -1823,8 +2199,8 @@ class SequenceArchiverApp:
         subdirectory_combo.bind("<<ComboboxSelected>>", update_preview_and_status)
         update_preview_and_status()
 
-    def show_main_archiver_screen(self):
-        self.root.title("APPLEMANGO ARCHIVER - Main")
+    def show_workspace_archiver_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Workspace")
         self.clear_screen()
 
         _, ip_addr, status_text = self.get_connection_snapshot()
@@ -1832,7 +2208,7 @@ class SequenceArchiverApp:
         page = tk.Frame(self.root, bg="white", padx=16, pady=16)
         page.pack(fill="both", expand=True)
 
-        header = tk.LabelFrame(page, text="Main Archiver", bg="white", padx=14, pady=10)
+        header = tk.LabelFrame(page, text="Workspace Archiver", bg="white", padx=14, pady=10)
         header.pack(fill="x", pady=(0, 10))
 
         tk.Label(header, text=f"Logged-in Username: {session_account_name or session_username}", bg="white", anchor="w").pack(fill="x", pady=2)
@@ -1841,9 +2217,12 @@ class SequenceArchiverApp:
         tk.Label(header, text=f"Current Workspace: {active_workspace or 'Not selected'}", bg="white", anchor="w").pack(fill="x", pady=2)
         tk.Label(header, text=f"Connection Status: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
 
+        action_row = tk.Frame(header, bg="white")
+        action_row.pack(anchor="e", pady=(8, 0))
+
         tk.Button(
-            header,
-            text="Change Workspace",
+            action_row,
+            text="Leave Workspace",
             width=20,
             bg="#d9d9d9",
             activebackground="#c0c0c0",
@@ -1851,12 +2230,103 @@ class SequenceArchiverApp:
             bd=0,
             highlightthickness=0,
             cursor="hand2",
-            command=self.show_workspace_selection_screen
-        ).pack(anchor="e", pady=(8, 0))
+            command=self.leave_workspace
+        ).pack(side="left")
+
+        tk.Button(
+            action_row,
+            text="Back to Main",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_main_archiver_screen
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Button(
+            action_row,
+            text="Logout",
+            width=20,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.logout_and_return_to_login
+        ).pack(side="left", padx=(8, 0))
 
         body = tk.Frame(page, bg="white")
         body.pack(fill="both", expand=True)
         self.build_archiver_panel(body)
+
+    def show_main_archiver_screen(self):
+        self.root.title("APPLEMANGO ARCHIVER - Main")
+        self.clear_screen()
+
+        _, ip_addr, status_text = self.get_connection_snapshot()
+
+        page = tk.Frame(self.root, bg="white", padx=24, pady=28)
+        page.pack(fill="both", expand=True)
+
+        tk.Label(page, text="APPLEMANGO ARCHIVER", font=("Segoe UI", 16, "bold"), bg="white", anchor="center", justify="center").pack(pady=(0, 10))
+        tk.Label(page, text=f"Logged-in Username: {session_account_name or session_username}", bg="white", anchor="center", justify="center").pack(pady=2)
+        tk.Label(page, text=f"Server Name: {default_server_name}", bg="white", anchor="center", justify="center").pack(pady=2)
+        tk.Label(page, text=f"IP Address: {ip_addr}", bg="white", anchor="center", justify="center").pack(pady=2)
+        tk.Label(page, text=f"Connection Status: {status_text}", bg="white", anchor="center", justify="center").pack(pady=(2, 14))
+
+        tk.Label(page, text="Choose Flow", font=("Segoe UI", 12, "bold"), bg="white", anchor="center", justify="center").pack(pady=(0, 8))
+
+        tk.Button(
+            page,
+            text="Enter Workspace",
+            width=28,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_workspace_selection_screen
+        ).pack(pady=(0, 8))
+
+        tk.Button(
+            page,
+            text="View Archive Architecture",
+            width=28,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.show_archive_architecture_screen
+        ).pack()
+
+        tk.Label(
+            page,
+            text=f"Current Workspace: {active_workspace or 'Not selected'}",
+            bg="white",
+            fg="#666666",
+            anchor="center",
+            justify="center"
+        ).pack(pady=(14, 0))
+
+        tk.Button(
+            page,
+            text="Logout",
+            width=28,
+            bg="#d9d9d9",
+            activebackground="#c0c0c0",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.logout_and_return_to_login
+        ).pack(pady=(14, 0))
 
 def main():
     app = SequenceArchiverApp()
