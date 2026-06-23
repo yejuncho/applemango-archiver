@@ -1,18 +1,14 @@
-﻿import os
+import os
 import re
-import json
-import importlib
-import socket
-import ctypes
 import shutil
-import sqlite3
-import subprocess
 import threading
 import tkinter as tk
+
 from tkinter import ttk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
+from tkinter import messagebox
+
 from datetime import date, datetime
-from ctypes import wintypes
 from pathlib import Path
 
 try:
@@ -22,6 +18,8 @@ except ImportError:
     ImageTk = None
 
 try:
+    import importlib
+
     _tkinterdnd2 = importlib.import_module("tkinterdnd2")
     DND_FILES = _tkinterdnd2.DND_FILES
     TkinterDnD = _tkinterdnd2.TkinterDnD
@@ -29,786 +27,42 @@ except ImportError:
     DND_FILES = None
     TkinterDnD = None
 
-default_server_name = r"\\applemango"
-default_drive_letter = "Z"
-allowed_mapping_letters = list("ABDEFHIJKLMNOPQRSTUVWXYZ")
-default_server_port = 445
-
-session_logged_in = False
-session_username = ""
-session_password = ""
-session_account_name = ""
-
-active_workspace = ""
-active_workspace_drive = ""
-
-credential_store_path = Path.home() / ".applemango_archiver_credentials.json"
-archive_db_path = Path.home() / ".applemango_archiver" / "archive.db"
-logo_path = Path(__file__).resolve().parent.parent / "image" / "hiscom_logo.png"
-
-
-def apply_window_icon(window):
-    # Clear title-bar icons on Windows so no default Tk icon is shown.
-    def _clear_icon_handle():
-        try:
-            hwnd = int(window.winfo_id())
-            user32 = ctypes.windll.user32
-            wm_seticon = 0x0080
-            icon_small = 0
-            icon_big = 1
-            user32.SendMessageW(hwnd, wm_seticon, icon_small, 0)
-            user32.SendMessageW(hwnd, wm_seticon, icon_big, 0)
-        except Exception:
-            pass
-
-    try:
-        window.after(0, _clear_icon_handle)
-    except Exception:
-        _clear_icon_handle()
-
-DEFAULT_DOCUMENT_TYPES = [
-    "계약서",
-    "청구서",
-    "영수증",
-    "명단",
-    "출석",
-    "양식",
-    "보고서",
-    "회의록",
-    "사진",
-    "문서",
-    "기타",
-]
-
-
-def run_net_command(command):
-    return subprocess.run(
-        ["cmd", "/d", "/c", f"chcp 949>nul & {command}"],
-        capture_output=True,
-        text=True,
-        encoding="cp949",
-        errors="replace",
-    )
-
-
-def normalize_drive_letter(raw):
-    letter = (raw or "").strip().upper().rstrip(":")
-    if len(letter) != 1 or not letter.isalpha():
-        return None
-    return f"{letter}:"
-
-
-def get_mapped_network_drives():
-    result = run_net_command("net use")
-
-    if result.returncode != 0:
-        return None
-
-    entries = []
-    for raw_line in result.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("Status") or line.startswith("---") or line.startswith("The command completed"):
-            continue
-
-        cols = re.split(r"\s{2,}", line)
-        drive = ""
-        remote = ""
-
-        if len(cols) >= 3 and cols[1].endswith(":"):
-            drive = cols[1].upper()
-            remote = cols[2]
-        elif len(cols) >= 2 and cols[0].endswith(":"):
-            drive = cols[0].upper()
-            remote = cols[1]
-        else:
-            continue
-
-        if remote.startswith("\\\\"):
-            entries.append((drive, remote))
-
-    return entries
-
-
-def get_current_mapped_letters():
-    entries = get_mapped_network_drives()
-    if entries is None:
-        return set()
-    return {drive for drive, _ in entries}
-
-
-def get_available_mapping_letters():
-    used_letters = {drive.rstrip(":") for drive in get_current_mapped_letters()}
-    return [letter for letter in allowed_mapping_letters if letter not in used_letters]
-
-
-def extract_account_name(raw_username):
-    cleaned = (raw_username or "").strip()
-    if "\\" in cleaned:
-        cleaned = cleaned.split("\\")[-1]
-    if "@" in cleaned:
-        cleaned = cleaned.split("@")[0]
-    return cleaned
-
-
-def get_server_ip(server_name):
-    normalized_server = server_name.strip().lstrip("\\")
-    if not normalized_server:
-        return "연결 불가"
-
-    try:
-        return socket.gethostbyname(normalized_server)
-    except OSError:
-        return "연결 불가"
-
-
-def check_server_availability(server_name):
-    normalized_server = server_name.strip().lstrip("\\")
-    if not normalized_server:
-        return False, "연결 불가"
-
-    ip_addr = get_server_ip(server_name)
-    ping_result = subprocess.run(["ping", "-n", "1", normalized_server], capture_output=True, text=True)
-    return ping_result.returncode == 0, ip_addr
-
-
-def check_local_network_connectivity(server_name, port=default_server_port, timeout=1.2):
-    normalized_server = server_name.strip().lstrip("\\")
-    if not normalized_server:
-        return False, "서버 주소 미설정"
-
-    try:
-        with socket.create_connection((normalized_server, port), timeout=timeout):
-            return True, "NAS 연결 가능"
-    except OSError:
-        return False, "NAS 연결 불가"
-
-
-def load_saved_credentials():
-    if not credential_store_path.exists():
-        return None
-
-    try:
-        payload = json.loads(credential_store_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    username = str(payload.get("username", "")).strip()
-    password = str(payload.get("password", ""))
-    if not username or not password:
-        return None
-    return {"username": username, "password": password}
-
-
-def save_credentials(username, password):
-    payload = {"username": username.strip(), "password": password}
-    credential_store_path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def clear_saved_credentials():
-    if credential_store_path.exists():
-        try:
-            credential_store_path.unlink()
-        except OSError:
-            pass
-
-
-def authenticate_to_server(username, password):
-    subprocess.run(["net", "use", fr"{default_server_name}\IPC$", "/delete", "/y"],
-                   capture_output=True, text=True, encoding="cp949", errors="replace")
-
-    login_cmd = ["net", "use", fr"{default_server_name}\IPC$", password, f"/user:{username}", "/persistent:no"]
-    login_result = subprocess.run(login_cmd, capture_output=True, text=True, encoding="cp949", errors="replace")
-    if login_result.returncode == 0:
-        return True, ""
-
-    err = login_result.stderr.strip() or login_result.stdout.strip() or "알 수 없는 오류"
-    return False, err
-
-
-def update_session_login(username, password):
-    global session_logged_in, session_username, session_password, session_account_name
-
-    session_logged_in = True
-    session_username = username.strip()
-    session_password = password
-    session_account_name = extract_account_name(username)
-
-
-def clear_session_login():
-    global session_logged_in, session_username, session_password, session_account_name
-
-    session_logged_in = False
-    session_username = ""
-    session_password = ""
-    session_account_name = ""
-
-
-def get_server_share_names(server_name):
-    normalized_server = server_name.strip().lstrip("\\")
-    if not normalized_server:
-        return None
-
-    class SHARE_INFO_1(ctypes.Structure):
-        _fields_ = [
-            ("shi1_netname", wintypes.LPWSTR),
-            ("shi1_type", wintypes.DWORD),
-            ("shi1_remark", wintypes.LPWSTR),
-        ]
-
-    netapi32 = ctypes.WinDLL("Netapi32.dll")
-    net_share_enum = netapi32.NetShareEnum
-    net_share_enum.argtypes = [
-        wintypes.LPWSTR,
-        wintypes.DWORD,
-        ctypes.POINTER(ctypes.c_void_p),
-        wintypes.DWORD,
-        ctypes.POINTER(wintypes.DWORD),
-        ctypes.POINTER(wintypes.DWORD),
-        ctypes.POINTER(wintypes.DWORD),
-    ]
-    net_share_enum.restype = wintypes.DWORD
-
-    net_api_buffer_free = netapi32.NetApiBufferFree
-    net_api_buffer_free.argtypes = [ctypes.c_void_p]
-    net_api_buffer_free.restype = wintypes.DWORD
-
-    shares = []
-    resume_handle = wintypes.DWORD(0)
-    server_unc = f"\\\\{normalized_server}"
-
-    while True:
-        buffer = ctypes.c_void_p()
-        entries_read = wintypes.DWORD(0)
-        total_entries = wintypes.DWORD(0)
-
-        status = net_share_enum(
-            server_unc,
-            1,
-            ctypes.byref(buffer),
-            0xFFFFFFFF,
-            ctypes.byref(entries_read),
-            ctypes.byref(total_entries),
-            ctypes.byref(resume_handle),
-        )
-
-        if status not in (0, 234):
-            if buffer:
-                net_api_buffer_free(buffer)
-            return None
-
-        if entries_read.value and buffer:
-            share_array = ctypes.cast(buffer, ctypes.POINTER(SHARE_INFO_1))
-            for idx in range(entries_read.value):
-                share_name = share_array[idx].shi1_netname
-                if share_name and not share_name.endswith("$"):
-                    shares.append(share_name)
-
-        if buffer:
-            net_api_buffer_free(buffer)
-
-        if status == 0:
-            break
-
-    return list(dict.fromkeys(shares))
-
-
-def discover_server_shares(server_name):
-    shares = get_server_share_names(server_name) or []
-
-    if not shares:
-        try:
-            server_root = Path(server_name)
-            for child in server_root.iterdir():
-                if child.name and not child.name.endswith("$"):
-                    shares.append(child.name)
-        except OSError:
-            shares = []
-
-    if not shares:
-        shares_result = run_net_command(f"net view {server_name}")
-        if shares_result.returncode == 0:
-            in_table = False
-            header_skipped = False
-            for raw_line in shares_result.stdout.splitlines():
-                stripped = raw_line.strip()
-                if not stripped:
-                    continue
-
-                if not in_table:
-                    if set(stripped) == {"-"}:
-                        in_table = True
-                        header_skipped = False
-                    continue
-
-                if stripped.lower().startswith("the command completed"):
-                    break
-
-                if not header_skipped:
-                    header_skipped = True
-                    continue
-
-                cols = re.split(r"\s{2,}", stripped)
-                if cols:
-                    shares.append(cols[0])
-
-    return list(dict.fromkeys(shares))
-
-
-def show_mapped_drives_window(root):
-    mapped_entries = get_mapped_network_drives()
-    if mapped_entries is None:
-        messagebox.showerror("매핑 드라이브", "매핑된 드라이브 목록을 읽을 수 없습니다.", parent=root)
-        return
-
-    if not mapped_entries:
-        messagebox.showinfo("매핑 드라이브", "매핑된 드라이브가 없습니다.", parent=root)
-        return
-
-    win = tk.Toplevel(root)
-    apply_window_icon(win)
-    win.title("매핑된 네트워크 드라이브")
-    win.geometry("460x420")
-    win.configure(bg="white")
-    win.transient(root)
-
-    tk.Label(win, text="매핑된 네트워크 드라이브", font=("Segoe UI", 10, "bold"), bg="white").pack(pady=(10, 8))
-
-    frame = tk.Frame(win, bg="white")
-    frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
-    listbox = tk.Listbox(frame, font=("Segoe UI", 10), activestyle="none", selectmode="extended")
-    listbox.pack(side="left", fill="both", expand=True)
-
-    scroll = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
-    scroll.pack(side="right", fill="y")
-    listbox.configure(yscrollcommand=scroll.set)
-
-    for drive, remote in mapped_entries:
-        listbox.insert("end", f"{drive} -> {remote}")
-
-    button_row = tk.Frame(win, bg="white")
-    button_row.pack(pady=(0, 12))
-
-    unmap_btn = tk.Button(
-        button_row,
-        text="선택 드라이브 연결 해제",
-        width=20,
-        state="disabled",
-        bg="#d9d9d9",
-        fg="black",
-        activebackground="#c0c0c0",
-        relief="flat",
-        bd=0,
-        highlightthickness=0,
-        cursor="hand2",
-    )
-    unmap_btn.pack(side="left")
-
-    tk.Button(
-        button_row,
-        text="닫기",
-        width=14,
-        command=win.destroy,
-        bg="#d9d9d9",
-        activebackground="#c0c0c0",
-        relief="flat",
-        bd=0,
-        highlightthickness=0,
-        cursor="hand2",
-    ).pack(side="left", padx=(8, 0))
-
-    def update_unmap_button(*_):
-        has_selection = bool(listbox.curselection())
-        if has_selection:
-            unmap_btn.config(state="normal", bg="#4caf50", fg="white", activebackground="#43a047")
-        else:
-            unmap_btn.config(state="disabled", bg="#d9d9d9", fg="black", activebackground="#c0c0c0")
-
-    def unmap_selected_drives():
-        selected_indices = list(listbox.curselection())
-        if not selected_indices:
-            return
-
-        failures = []
-        for idx in selected_indices:
-            drive, _remote = mapped_entries[idx]
-            result = subprocess.run(["net", "use", drive, "/delete", "/y"],
-                                     capture_output=True, text=True, encoding="cp949", errors="replace")
-            if result.returncode != 0:
-                err = result.stderr.strip() or result.stdout.strip() or "알 수 없는 오류"
-                failures.append(f"{drive}: {err}")
-
-        if failures:
-            messagebox.showerror(
-                "드라이브 연결 해제",
-                "일부 드라이브 연결 해제에 실패했습니다.\n\n" + "\n".join(failures),
-                parent=win,
-            )
-
-        refreshed = get_mapped_network_drives()
-        if refreshed is None:
-            messagebox.showerror("매핑 드라이브", "매핑된 드라이브 목록을 새로고침할 수 없습니다.", parent=win)
-            return
-
-        mapped_entries[:] = refreshed
-        listbox.delete(0, "end")
-        for drive, remote in mapped_entries:
-            listbox.insert("end", f"{drive} -> {remote}")
-
-        update_unmap_button()
-
-        if not mapped_entries:
-            messagebox.showinfo("매핑 드라이브", "매핑된 드라이브가 없습니다.", parent=win)
-            win.destroy()
-
-    listbox.bind("<<ListboxSelect>>", update_unmap_button)
-    unmap_btn.config(command=unmap_selected_drives)
-
-
-class ArchiveDatabase:
-    def __init__(self, db_path):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-
-    def _connect(self):
-        return sqlite3.connect(self.db_path)
-
-    def _init_db(self):
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    workspace TEXT NOT NULL,
-                    original_filename TEXT NOT NULL,
-                    archived_filename TEXT NOT NULL,
-                    full_path TEXT NOT NULL,
-                    document_type TEXT,
-                    tags TEXT,
-                    uploaded_by TEXT,
-                    archive_date TEXT,
-                    archived_at TEXT,
-                    file_ext TEXT,
-                    file_size INTEGER,
-                    source_path TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS document_types (
-                    name TEXT PRIMARY KEY
-                )
-                """
-            )
-            conn.executemany(
-                'INSERT OR IGNORE INTO document_types(name) VALUES (?)',
-                [(item,) for item in DEFAULT_DOCUMENT_TYPES],
-            )
-            conn.commit()
-
-    def get_document_types(self):
-        with self._connect() as conn:
-            rows = conn.execute('SELECT name FROM document_types ORDER BY name COLLATE NOCASE').fetchall()
-        values = [row[0] for row in rows]
-        return values or list(DEFAULT_DOCUMENT_TYPES)
-
-    def insert_file_record(self, record):
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO files (
-                    workspace, original_filename, archived_filename, full_path,
-                    document_type, tags, uploaded_by, archive_date, archived_at,
-                    file_ext, file_size, source_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.get('workspace', ''),
-                    record.get('original_filename', ''),
-                    record.get('archived_filename', ''),
-                    record.get('full_path', ''),
-                    record.get('document_type', ''),
-                    record.get('tags', ''),
-                    record.get('uploaded_by', ''),
-                    record.get('archive_date', ''),
-                    record.get('archived_at', ''),
-                    record.get('file_ext', ''),
-                    int(record.get('file_size', 0) or 0),
-                    record.get('source_path', ''),
-                ),
-            )
-            conn.commit()
-
-    def search_files(self, workspace, date_prefix=None, document_type='전체', tags='', free_text=''):
-        query = (
-            'SELECT archive_date, document_type, tags, archived_filename, uploaded_by, file_size, full_path '
-            'FROM files WHERE workspace = ?'
-        )
-        params = [workspace]
-
-        if date_prefix:
-            query += ' AND archive_date LIKE ?'
-            params.append(f'{date_prefix}%')
-
-        if document_type and document_type != '전체':
-            query += ' AND document_type = ?'
-            params.append(document_type)
-
-        if tags:
-            query += ' AND tags LIKE ?'
-            params.append(f'%{tags}%')
-
-        if free_text:
-            query += (
-                ' AND ('
-                'original_filename LIKE ? OR archived_filename LIKE ? OR tags LIKE ? OR '
-                'uploaded_by LIKE ? OR source_path LIKE ? OR full_path LIKE ?'
-                ')'
-            )
-            token = f'%{free_text}%'
-            params.extend([token, token, token, token, token, token])
-
-        query += ' ORDER BY archive_date DESC, archived_at DESC'
-
-        with self._connect() as conn:
-            return conn.execute(query, params).fetchall()
-
-    def count_files_by_workspace(self, workspace):
-        with self._connect() as conn:
-            row = conn.execute('SELECT COUNT(*) FROM files WHERE workspace = ?', (workspace,)).fetchone()
-        return int(row[0] if row and row[0] is not None else 0)
-
-    def delete_file_records_by_paths(self, workspace, full_paths):
-        targets = [str(path) for path in full_paths if str(path).strip()]
-        if not targets:
-            return
-
-        with self._connect() as conn:
-            placeholders = ','.join('?' for _ in targets)
-            conn.execute(
-                f'DELETE FROM files WHERE workspace = ? AND full_path IN ({placeholders})',
-                [workspace] + targets,
-            )
-            conn.commit()
-
-
-class FilenameBuilder:
-    _invalid_chars = re.compile(r'[<>:"/\\|?*]')
-
-    @classmethod
-    def _sanitize_part(cls, value):
-        cleaned = cls._invalid_chars.sub('_', str(value or '').strip())
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip().strip('.')
-        return cleaned
-
-    def build_filename(self, archive_date, document_type, tags, original_name):
-        original = Path(original_name)
-        stem = self._sanitize_part(original.stem) or 'untitled'
-        ext = original.suffix
-
-        date_part = self._sanitize_part(archive_date) or date.today().isoformat()
-        doc_part = self._sanitize_part(document_type) or '기타'
-        tag_part = self._sanitize_part(tags)
-
-        parts = [date_part, doc_part]
-        if tag_part:
-            parts.append(tag_part)
-        parts.append(stem)
-        return '__'.join(parts) + ext
-
-    def ensure_unique_name(self, destination_dir, candidate_name, reserved_names=None):
-        reserved_names = reserved_names if reserved_names is not None else set()
-        candidate = Path(candidate_name)
-        stem = candidate.stem
-        ext = candidate.suffix
-
-        name = candidate_name
-        idx = 2
-        while True:
-            taken_in_reserved = name in reserved_names
-            taken_on_disk = bool(destination_dir and (destination_dir / name).exists())
-            if not taken_in_reserved and not taken_on_disk:
-                reserved_names.add(name)
-                return name
-            name = f'{stem} ({idx}){ext}'
-            idx += 1
-
-
-class WorkspaceManager:
-    def map_workspace(self, workspace_name, username, password):
-        normalized = str(workspace_name or '').strip()
-        if not normalized:
-            return None, False, '워크스페이스 이름이 비어 있습니다.'
-
-        unc_path = fr'{default_server_name}\{normalized}'
-
-        existing = get_mapped_network_drives()
-        if existing is not None:
-            for drive, remote in existing:
-                if str(remote).rstrip('\\').lower() == unc_path.rstrip('\\').lower():
-                    return drive, False, ''
-
-        available = get_available_mapping_letters()
-        if not available:
-            return None, False, '사용 가능한 드라이브 문자가 없습니다.'
-
-        target_drive = normalize_drive_letter(default_drive_letter)
-        if target_drive and target_drive.rstrip(':') in available:
-            drive = target_drive
-        else:
-            drive = f"{available[0]}:"
-
-        cmd = ['net', 'use', drive, unc_path, password, f'/user:{username}', '/persistent:no']
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='cp949', errors='replace')
-        if result.returncode != 0:
-            err = result.stderr.strip() or result.stdout.strip() or '알 수 없는 오류'
-            return None, False, err
-
-        return drive, True, ''
-
-    def unmap_drive(self, drive_letter):
-        drive = normalize_drive_letter(drive_letter)
-        if not drive:
-            return
-        subprocess.run(['net', 'use', drive, '/delete', '/y'], capture_output=True, text=True, encoding='cp949', errors='replace')
-
-
-class WorkspaceCard(tk.Frame):
-    def __init__(self, parent, workspace_name, on_click=None):
-        super().__init__(parent, bg='#cfcfcf', bd=0, highlightthickness=1, highlightbackground='#cfcfcf', height=62)
-        self.pack_propagate(False)
-
-        self.workspace_name = workspace_name
-        self.on_click = on_click
-        self._progress = 0.0
-        self._target_progress = 0.0
-        self._animating = False
-        self._collapsed_height = 62
-        self._expanded_height = 136
-        self._bg_start = '#ffffff'
-        self._bg_end = '#5bbf6a'
-        self._title_fg_start = '#1f1f1f'
-        self._title_fg_end = '#ffffff'
-        self._meta_fg_start = '#7f8a80'
-        self._meta_fg_end = '#ffffff'
-
-        self.body = tk.Frame(self, bg=self._bg_start)
-        self.body.pack(fill='both', expand=True)
-
-        self.title_label = tk.Label(
-            self.body,
-            text=workspace_name,
-            font=('Segoe UI', 12, 'bold'),
-            bg=self._bg_start,
-            fg=self._title_fg_start,
-            anchor='w',
-        )
-        self.title_label.place(x=18, y=17, relwidth=0.9, height=24)
-
-        self.meta_labels = [
-            tk.Label(self.body, text='', font=('Segoe UI', 9), bg=self._bg_start, fg=self._meta_fg_start, anchor='w')
-            for _ in range(3)
-        ]
-        self.meta_labels[0].place(x=18, y=56, relwidth=0.9, height=18)
-        self.meta_labels[1].place(x=18, y=77, relwidth=0.9, height=18)
-        self.meta_labels[2].place(x=18, y=98, relwidth=0.9, height=18)
-
-        self.set_loading()
-        self._bind_events()
-        self._apply_style(0.0)
-
-    def _bind_events(self):
-        widgets = [self, self.body, self.title_label] + self.meta_labels
-        for widget in widgets:
-            widget.bind('<Enter>', self._on_enter, add='+')
-            widget.bind('<Leave>', self._on_leave, add='+')
-            widget.bind('<Button-1>', self._on_click, add='+')
-
-    def _on_enter(self, _event):
-        self._target_progress = 1.0
-        self._start_animation()
-
-    def _on_leave(self, _event):
-        self._target_progress = 0.0
-        self._start_animation()
-
-    def _on_click(self, _event):
-        if callable(self.on_click):
-            self.on_click(self.workspace_name)
-
-    def _start_animation(self):
-        if self._animating:
-            return
-        self._animating = True
-        self.after(16, self._animate_step)
-
-    def _animate_step(self):
-        if abs(self._target_progress - self._progress) < 0.01:
-            self._progress = self._target_progress
-            self._apply_style(self._progress)
-            self._animating = False
-            return
-
-        step = 0.05
-        if self._target_progress > self._progress:
-            self._progress = min(self._target_progress, self._progress + step)
-        else:
-            self._progress = max(self._target_progress, self._progress - step)
-
-        self._apply_style(self._progress)
-        self.after(16, self._animate_step)
-
-    @staticmethod
-    def _hex_to_rgb(hex_color):
-        value = hex_color.lstrip('#')
-        return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
-
-    @staticmethod
-    def _rgb_to_hex(rgb):
-        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-
-    def _blend(self, c1, c2, progress):
-        r1, g1, b1 = self._hex_to_rgb(c1)
-        r2, g2, b2 = self._hex_to_rgb(c2)
-        rgb = (
-            int(r1 + (r2 - r1) * progress),
-            int(g1 + (g2 - g1) * progress),
-            int(b1 + (b2 - b1) * progress),
-        )
-        return self._rgb_to_hex(rgb)
-
-    def _apply_style(self, progress):
-        bg_color = self._blend(self._bg_start, self._bg_end, progress)
-        border_color = self._blend('#cfcfcf', '#52b55f', progress)
-        title_color = self._blend(self._title_fg_start, self._title_fg_end, progress)
-
-        metadata_progress = max(0.0, min(1.0, (progress - 0.2) / 0.8))
-        meta_color = self._blend(self._meta_fg_start, self._meta_fg_end, metadata_progress)
-
-        height = int(self._collapsed_height + (self._expanded_height - self._collapsed_height) * progress)
-        title_y = int(17 - 8 * progress)
-
-        self.configure(height=height, bg=border_color, highlightbackground=border_color)
-        self.body.configure(bg=bg_color)
-        self.title_label.configure(bg=bg_color, fg=title_color)
-        self.title_label.place_configure(y=title_y)
-
-        for label in self.meta_labels:
-            label.configure(bg=bg_color, fg=meta_color)
-
-    def set_loading(self):
-        self.meta_labels[0].configure(text='마지막 수정 날짜: 로딩 중...')
-        self.meta_labels[1].configure(text='워크스페이스 크기: 로딩 중...')
-        self.meta_labels[2].configure(text='워크스페이스 파일 수: 로딩 중...')
-
-    def set_metadata(self, meta):
-        self.meta_labels[0].configure(text=f"마지막 수정 날짜: {meta['last_modified']}")
-        self.meta_labels[1].configure(text=f"워크스페이스 크기: {meta['size_text']}")
-        self.meta_labels[2].configure(text=f"워크스페이스 파일 수: {meta['file_count']:,}개")
+import applemango_dms.config as config
+
+import applemango_dms.state as state
+
+from applemango_dms.db.archive_db import ArchiveDatabase
+
+from applemango_dms.services.auth import (
+    load_saved_credentials,
+    save_credentials,
+    clear_saved_credentials,
+    authenticate_to_server,
+    update_session_login,
+    clear_session_login,
+)
+
+from applemango_dms.services.nas import (
+    check_server_availability,
+    check_local_network_connectivity,
+    discover_server_shares,
+)
+
+from applemango_dms.services.workspace import (
+    WorkspaceManager,
+)
+
+from applemango_dms.services.filenames import (
+    FilenameBuilder,
+)
+
+from applemango_dms.ui.widgets import (
+    WorkspaceCard,
+)
+
+from applemango_dms.utils.windows import (
+    apply_window_icon,
+)
 
 class SequenceArchiverApp:
     def __init__(self):
@@ -818,7 +72,7 @@ class SequenceArchiverApp:
         self.root.configure(bg="white")
         self.root.resizable(True, True)
 
-        self.db = ArchiveDatabase(archive_db_path)
+        self.db = ArchiveDatabase(config.archive_db_path)
         self.filename_builder = FilenameBuilder()
         self.workspace_manager = WorkspaceManager()
         self.workspace_drive_mapped_by_app = False
@@ -846,7 +100,7 @@ class SequenceArchiverApp:
         return f"{size_bytes / mb:.1f} MB"
 
     def _collect_workspace_filesystem_stats(self, workspace_name):
-        root_path = fr"{default_server_name}\{workspace_name}"
+        root_path = fr"{config.default_server_name}\{workspace_name}"
         total_size = 0
         file_count = 0
         last_mtime = None
@@ -946,11 +200,11 @@ class SequenceArchiverApp:
         return image.resize(new_size, Image.LANCZOS)
 
     def _load_logo_photo(self, max_width, max_height):
-        if Image is None or ImageTk is None or not logo_path.exists():
+        if Image is None or ImageTk is None or not config.logo_path.exists():
             return None
 
         try:
-            image = Image.open(logo_path)
+            image = Image.open(config.logo_path)
             resized = self._resize_image_fit(image, max_width=max_width, max_height=max_height)
             return ImageTk.PhotoImage(resized)
         except Exception:
@@ -977,7 +231,7 @@ class SequenceArchiverApp:
         self.login_connectivity["running"] = True
 
         def worker():
-            connected, status_text = check_local_network_connectivity(default_server_name)
+            connected, status_text = check_local_network_connectivity(config.default_server_name)
 
             def apply_result():
                 self.login_connectivity["running"] = False
@@ -1314,24 +568,22 @@ class SequenceArchiverApp:
         return canvas
 
     def get_connection_snapshot(self):
-        is_connected, ip_addr = check_server_availability(default_server_name)
+        is_connected, ip_addr = check_server_availability(config.default_server_name)
         status = "연결됨" if is_connected else "연결 불가"
         return is_connected, ip_addr, status
 
     def set_workspace(self, workspace, drive_letter, mapped_by_app):
-        global active_workspace, active_workspace_drive
-        active_workspace = workspace
-        active_workspace_drive = drive_letter
+        state.active_workspace = workspace
+        state.active_workspace_drive = drive_letter
         self.workspace_drive_mapped_by_app = mapped_by_app
 
     def clear_workspace(self, unmap_if_needed=False):
-        global active_workspace, active_workspace_drive
 
-        if unmap_if_needed and self.workspace_drive_mapped_by_app and active_workspace_drive:
-            self.workspace_manager.unmap_drive(active_workspace_drive)
+        if unmap_if_needed and self.workspace_drive_mapped_by_app and state.active_workspace_drive:
+            self.workspace_manager.unmap_drive(state.active_workspace_drive)
 
-        active_workspace = ""
-        active_workspace_drive = ""
+        state.active_workspace = ""
+        state.active_workspace_drive = ""
         self.workspace_drive_mapped_by_app = False
 
     def logout_and_return_to_login(self):
@@ -1439,7 +691,7 @@ class SequenceArchiverApp:
                 "사내 네트워크에 연결되어 있는지 확인한 후 다시 시도해 주세요."
             )
 
-            is_network_connected, _ = check_local_network_connectivity(default_server_name)
+            is_network_connected, _ = check_local_network_connectivity(config.default_server_name)
             if not is_network_connected:
                 messagebox.showerror("로그인 실패", network_warning_msg, parent=self.root)
                 return
@@ -1529,11 +781,10 @@ class SequenceArchiverApp:
     def show_workspace_selection_screen(self):
         self._stop_login_connectivity_polling()
         # Unmap current workspace drive when returning to selection (one-drive-at-a-time)
-        global active_workspace, active_workspace_drive
-        if active_workspace_drive and self.workspace_drive_mapped_by_app:
-            self.workspace_manager.unmap_drive(active_workspace_drive)
-        active_workspace = ""
-        active_workspace_drive = ""
+        if state.active_workspace_drive and self.workspace_drive_mapped_by_app:
+            self.workspace_manager.unmap_drive(state.active_workspace_drive)
+        state.active_workspace = ""
+        state.active_workspace_drive = ""
         self.workspace_drive_mapped_by_app = False
 
         self._resize(760, 680)
@@ -1541,17 +792,17 @@ class SequenceArchiverApp:
         self.clear_screen()
 
         _, ip_addr, status_text = self.get_connection_snapshot()
-        shares = discover_server_shares(default_server_name)
+        shares = discover_server_shares(config.default_server_name)
 
         container = tk.Frame(self.root, padx=24, pady=20, bg="white")
         container.pack(fill="both", expand=True)
 
         tk.Label(container, text="워크스페이스 선택", font=("Segoe UI", 18, "bold"), bg="white").pack(anchor="w", pady=(0, 10))
-        tk.Label(container, text=f"서버: {default_server_name}", font=("Segoe UI", 10), bg="white", fg="#3c3c3c", anchor="w").pack(fill="x")
+        tk.Label(container, text=f"서버: {config.default_server_name}", font=("Segoe UI", 10), bg="white", fg="#3c3c3c", anchor="w").pack(fill="x")
         tk.Label(container, text=f"상태: {status_text}", font=("Segoe UI", 10), bg="white", fg="#3c3c3c", anchor="w").pack(fill="x", pady=(2, 0))
         tk.Label(
             container,
-            text=f"로그인 사용자: {session_account_name or session_username}",
+            text=f"로그인 사용자: {state.session_account_name or state.session_username}",
             font=("Segoe UI", 10),
             bg="white",
             fg="#3c3c3c",
@@ -1584,7 +835,7 @@ class SequenceArchiverApp:
         workspace_cards = {}
 
         def enter_workspace(selected):
-            drive, mapped_by_app, err = self.workspace_manager.map_workspace(selected, session_username, session_password)
+            drive, mapped_by_app, err = self.workspace_manager.map_workspace(selected, state.session_username, state.session_password)
             if not drive:
                 messagebox.showerror("워크스페이스", f"워크스페이스 드라이브 매핑에 실패했습니다:\n{err}", parent=self.root)
                 return
@@ -1636,15 +887,15 @@ class SequenceArchiverApp:
         header = tk.LabelFrame(parent, text=title, bg="white", padx=14, pady=10)
         header.pack(fill="x", pady=(0, 10))
 
-        tk.Label(header, text=f"로그인 계정: {session_account_name or session_username}", bg="white", anchor="w").pack(fill="x", pady=2)
-        tk.Label(header, text=f"서버 이름: {default_server_name}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"로그인 계정: {state.session_account_name or state.session_username}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"서버 이름: {config.default_server_name}", bg="white", anchor="w").pack(fill="x", pady=2)
         tk.Label(header, text=f"서버 IP: {ip_addr}", bg="white", anchor="w").pack(fill="x", pady=2)
-        tk.Label(header, text=f"현재 워크스페이스: {active_workspace or '선택 안 됨'}", bg="white", anchor="w").pack(fill="x", pady=2)
-        tk.Label(header, text=f"매핑 드라이브: {active_workspace_drive or '매핑 안 됨'}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"현재 워크스페이스: {state.active_workspace or '선택 안 됨'}", bg="white", anchor="w").pack(fill="x", pady=2)
+        tk.Label(header, text=f"매핑 드라이브: {state.active_workspace_drive or '매핑 안 됨'}", bg="white", anchor="w").pack(fill="x", pady=2)
         tk.Label(header, text=f"연결 상태: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
 
     def show_main_workspace_menu(self):
-        if not active_workspace:
+        if not state.active_workspace:
             self.show_workspace_selection_screen()
             return
 
@@ -1674,7 +925,7 @@ class SequenceArchiverApp:
         menu_btn("로그아웃", self.logout_and_return_to_login)
 
     def build_destination_drive_path(self):
-        drive = normalize_drive_letter(active_workspace_drive)
+        drive = normalize_drive_letter(state.active_workspace_drive)
         if not drive:
             return None
         return Path(f"{drive}\\")
@@ -1713,8 +964,8 @@ class SequenceArchiverApp:
         # ---- state ----
         selected_files = []
         date_var = tk.StringVar(value=date.today().isoformat())
-        uploaded_by_var = tk.StringVar(value=session_account_name or session_username)
-        workspace_var = tk.StringVar(value=active_workspace)
+        uploaded_by_var = tk.StringVar(value=state.session_account_name or state.session_username)
+        workspace_var = tk.StringVar(value=state.active_workspace)
         tags_var = tk.StringVar(value="")
         doc_types = self.db.get_document_types()
         doc_type_var = tk.StringVar(value=("기타" if "기타" in doc_types else doc_types[0]))
@@ -1908,7 +1159,7 @@ class SequenceArchiverApp:
             except ValueError:
                 messagebox.showerror("파일 저장", "날짜 형식은 YYYY-MM-DD 이어야 합니다.", parent=self.root)
                 return
-            if not active_workspace:
+            if not state.active_workspace:
                 messagebox.showerror("파일 저장", "활성 워크스페이스가 없습니다.", parent=self.root)
                 return
             destination = self.build_destination_drive_path()
@@ -1932,7 +1183,7 @@ class SequenceArchiverApp:
                     shutil.copy2(src, dst)
                     size = dst.stat().st_size if dst.exists() else 0
                     self.db.insert_file_record({
-                        "workspace": active_workspace,
+                        "workspace": state.active_workspace,
                         "original_filename": src.name,
                         "archived_filename": archived_name,
                         "full_path": str(dst),
@@ -2010,7 +1261,7 @@ class SequenceArchiverApp:
         scroll_canvas.bind("<MouseWheel>", lambda e: scroll_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         # ---- state ----
-        workspace_var = tk.StringVar(value=active_workspace)
+        workspace_var = tk.StringVar(value=state.active_workspace)
         date_entry_var = tk.StringVar(value="")
         doc_type_var = tk.StringVar(value="전체")
         tags_var = tk.StringVar(value="")
@@ -2166,7 +1417,7 @@ class SequenceArchiverApp:
 
         def run_search():
             clear_results()
-            if not active_workspace:
+            if not state.active_workspace:
                 messagebox.showerror("파일 검색", "활성 워크스페이스가 없습니다.", parent=self.root)
                 return
             try:
@@ -2176,7 +1427,7 @@ class SequenceArchiverApp:
                 return
 
             rows = self.db.search_files(
-                workspace=active_workspace,
+                workspace=state.active_workspace,
                 date_prefix=date_prefix,
                 document_type=doc_type_var.get(),
                 tags=tags_var.get().strip(),
@@ -2195,7 +1446,7 @@ class SequenceArchiverApp:
                                      uploaded_by, size_text, full_path))
 
             if stale_paths:
-                self.db.delete_file_records_by_paths(active_workspace, stale_paths)
+                self.db.delete_file_records_by_paths(state.active_workspace, stale_paths)
             _update_action_buttons()
 
         def clear_filters_only():
@@ -2256,7 +1507,7 @@ class SequenceArchiverApp:
                 except OSError as exc:
                     errors.append(f"{path.name}: {exc}")
             if deleted_paths:
-                self.db.delete_file_records_by_paths(active_workspace, deleted_paths)
+                self.db.delete_file_records_by_paths(state.active_workspace, deleted_paths)
             if errors:
                 messagebox.showerror("파일 삭제", "일부 파일 삭제에 실패했습니다:\n\n" + "\n".join(errors), parent=self.root)
             run_search()
@@ -2281,7 +1532,7 @@ class SequenceArchiverApp:
         body = tk.Frame(dialog, bg="white", padx=16, pady=14)
         body.pack(fill="both", expand=True)
 
-        current_name = default_server_name.lstrip("\\")
+        current_name = config.default_server_name.lstrip("\\")
         tk.Label(body, text=f"현재 서버 이름: {current_name or '(없음)'}", bg="white", anchor="w").pack(fill="x", pady=(0, 8))
 
         tk.Label(body, text="새 서버 이름", bg="white", anchor="w").pack(fill="x")
@@ -2326,18 +1577,17 @@ class SequenceArchiverApp:
                 apply_btn.config(state="disabled", bg="#d9d9d9", fg="black", activebackground="#c0c0c0")
 
         def apply_server_name():
-            global default_server_name
 
             cleaned = new_server_var.get().strip().lstrip("\\")
             if not cleaned:
                 return
 
-            if active_workspace_drive and self.workspace_drive_mapped_by_app:
-                self.workspace_manager.unmap_drive(active_workspace_drive)
+            if state.active_workspace_drive and self.workspace_drive_mapped_by_app:
+                self.workspace_manager.unmap_drive(state.active_workspace_drive)
 
-            default_server_name = f"\\\\{cleaned}"
+            config.default_server_name = f"\\\\{cleaned}"
             self.clear_workspace(unmap_if_needed=False)
-            messagebox.showinfo("설정", f"서버 이름이 {default_server_name}(으)로 변경되었습니다.", parent=dialog)
+            messagebox.showinfo("설정", f"서버 이름이 {config.default_server_name}(으)로 변경되었습니다.", parent=dialog)
             dialog.destroy()
             self.show_workspace_selection_screen()
 
@@ -2384,17 +1634,6 @@ class SequenceArchiverApp:
         )
         settings_btn("닫기", settings_win.destroy)
 
-
-def main():
-    app = SequenceArchiverApp()
-    app.show_startup_screen()
-    app.root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
-
-
-
-
-
+    def run(self):
+        self.show_startup_screen()
+        self.root.mainloop()
