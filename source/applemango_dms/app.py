@@ -59,6 +59,7 @@ from applemango_dms.services.filenames import (
 
 from applemango_dms.ui.widgets import (
     WorkspaceCard,
+    WorkspaceStack,
 )
 
 from applemango_dms.ui.settings import (
@@ -347,7 +348,7 @@ class SequenceArchiverApp:
             fill=fill, outline=outline, width=width, tags=tags,
         )
 
-    def create_login_card(self, parent, width=360, height=470):
+    def create_login_card(self, parent, width=360, height=470, fill_top="#f9f8ff", fill_bottom="#f9f8ff", radius=22):
         """Draw the card as smooth polygons directly on parent canvas.
         No rectangular Frame/Canvas widget is used, so corners are always clean.
         """
@@ -361,7 +362,7 @@ class SequenceArchiverApp:
 
             x1, y1 = cx - width // 2, cy - height // 2
             x2, y2 = cx + width // 2, cy + height // 2
-            r = 22
+            r = radius
 
             # Layered soft shadow — darkest/furthest drawn first (lower z)
             self._smooth_rounded_rect(parent, x1 + 7, y1 + 9, x2 + 7, y2 + 9, r,
@@ -373,7 +374,11 @@ class SequenceArchiverApp:
 
             # Card fill then subtle border
             self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
-                                      fill="#f9f8ff", outline="", tags="cardfill")
+                                      fill=fill_bottom, outline="", tags="cardfill")
+            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
+                                      fill=fill_top, outline="", tags="cardfill")
+            self._smooth_rounded_rect(parent, x1 + 1, y1 + 1, x2 - 1, y2 - 7, r,
+                                      fill=fill_top, outline="", tags="cardfill")
             self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
                                       fill="", outline="#e4e6f0", width=1, tags="cardborder")
 
@@ -803,52 +808,102 @@ class SequenceArchiverApp:
         state.active_workspace_drive = ""
         self.workspace_drive_mapped_by_app = False
 
-        self._resize(760, 680)
+        self._center_window(760, 680)
         self.root.title("애플망고 DMS - 워크스페이스 선택")
         self.clear_screen()
+        self.root.configure(bg="#f8f8ff")
 
         _, ip_addr, status_text = self.get_connection_snapshot()
         shares = discover_server_shares(config.default_server_name)
 
-        container = tk.Frame(self.root, padx=24, pady=20, bg="white")
+        bg = tk.Canvas(self.root, bg="#f8f8ff", highlightthickness=0, bd=0)
+        bg.pack(fill="both", expand=True)
+
+        main_card = self.create_login_card(
+            bg,
+            width=702,
+            height=596,
+            fill_top="#f8f9ff",
+            fill_bottom="#e9eefc",
+        )
+        content = main_card["content"]
+        redraw = main_card["redraw"]
+
+        def on_bg_resize(event):
+            self._draw_login_gradient(event.width, event.height)
+            redraw(event.width // 2, event.height // 2)
+
+        bg.bind("<Configure>", on_bg_resize)
+
+        content.configure(bg="#f9f8ff")
+        container = tk.Frame(content, bg="#f9f8ff")
         container.pack(fill="both", expand=True)
 
-        tk.Label(container, text="워크스페이스 선택", font=("Segoe UI", 18, "bold"), bg="white").pack(anchor="w", pady=(0, 10))
-        tk.Label(container, text=f"서버: {config.default_server_name}", font=("Segoe UI", 10), bg="white", fg="#3c3c3c", anchor="w").pack(fill="x")
-        tk.Label(container, text=f"상태: {status_text}", font=("Segoe UI", 10), bg="white", fg="#3c3c3c", anchor="w").pack(fill="x", pady=(2, 0))
+        header_row = tk.Frame(container, bg="#f9f8ff")
+        header_row.pack(fill="x", pady=(0, 18))
+
+        left_header = tk.Frame(header_row, bg="#f9f8ff")
+        left_header.pack(side="left", fill="x", expand=True)
+
+        display_name = state.session_account_name or state.session_username or "사용자"
         tk.Label(
-            container,
-            text=f"로그인 사용자: {state.session_account_name or state.session_username}",
-            font=("Segoe UI", 10),
-            bg="white",
-            fg="#3c3c3c",
+            left_header,
+            text=f"환영합니다, {display_name}님",
+            font=("Segoe UI", 20, "bold"),
+            fg="#06012a",
+            bg="#f9f8ff",
             anchor="w",
-        ).pack(fill="x", pady=(2, 10))
+        ).pack(anchor="w")
+        tk.Label(
+            left_header,
+            text="워크스페이스를 선택해주세요.",
+            font=("Segoe UI", 10),
+            fg="#8d90a6",
+            bg="#f9f8ff",
+            anchor="w",
+        ).pack(anchor="w", pady=(6, 0))
 
-        action_row = tk.Frame(container, bg="white")
-        action_row.pack(fill="x", pady=(0, 10))
-        tk.Button(action_row, text="설정", width=12, bg="#d9d9d9", activebackground="#c0c0c0",
-                  relief="flat", bd=0, cursor="hand2", command=self.show_settings_screen).pack(side="left")
-        tk.Button(action_row, text="로그아웃", width=12, bg="#d9d9d9", activebackground="#c0c0c0",
-                  relief="flat", bd=0, cursor="hand2", command=self.logout_and_return_to_login).pack(side="left", padx=(8, 0))
+        right_header = tk.Frame(header_row, bg="#f9f8ff", bd=0, highlightthickness=0)
+        right_header.pack(side="right", anchor="ne")
 
-        cards_shell = tk.Frame(container, bg="white")
-        cards_shell.pack(fill="both", expand=True)
+        button_row = tk.Frame(right_header, bg="#f9f8ff")
+        button_row.pack(anchor="e")
 
-        cards_canvas = tk.Canvas(cards_shell, bg="white", highlightthickness=0)
-        cards_scroll = ttk.Scrollbar(cards_shell, orient="vertical", command=cards_canvas.yview)
-        cards_canvas.configure(yscrollcommand=cards_scroll.set)
-        cards_scroll.pack(side="right", fill="y")
-        cards_canvas.pack(side="left", fill="both", expand=True)
+        def header_button(parent, text, command, primary=False):
+            bg_color = "#f9f8ff"
+            fg_color = "#343a53"
+            active_bg = "#eef1fa"
+            tk.Button(
+                parent,
+                text=text,
+                width=2,
+                bg=bg_color,
+                fg=fg_color,
+                activebackground=active_bg,
+                activeforeground=fg_color,
+                font=("Segoe UI Symbol", 12),
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                cursor="hand2",
+                command=command,
+                padx=3,
+                pady=2,
+            ).pack(side="left", padx=(4, 0))
 
-        cards_body = tk.Frame(cards_canvas, bg="white")
-        cards_body_id = cards_canvas.create_window((0, 0), window=cards_body, anchor="nw")
+        header_button(button_row, "\u2699", self.show_settings_screen)
+        header_button(button_row, "\u21aa", self.logout_and_return_to_login)
 
-        cards_body.bind("<Configure>", lambda _e: cards_canvas.configure(scrollregion=cards_canvas.bbox("all")))
-        cards_canvas.bind("<Configure>", lambda e: cards_canvas.itemconfigure(cards_body_id, width=e.width))
-        cards_canvas.bind("<MouseWheel>", lambda e: cards_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        list_shell = tk.Canvas(container, bg="#f9f8ff", highlightthickness=0, bd=0)
+        list_shell.pack(fill="both", expand=True)
 
-        workspace_cards = {}
+        stack_surface = tk.Frame(list_shell, bg="#f9f8ff")
+        surface_window = list_shell.create_window(0, 0, window=stack_surface, anchor="nw")
+
+        stack_canvas = tk.Canvas(stack_surface, bg="#f9f8ff", highlightthickness=0, bd=0)
+        stack_canvas.pack(side="left", fill="both", expand=True, padx=(0, 2), pady=(2, 0))
+
+        empty_label = None
 
         def enter_workspace(selected):
             drive, mapped_by_app, err = self.workspace_manager.map_workspace(selected, state.session_username, state.session_password)
@@ -860,17 +915,130 @@ class SequenceArchiverApp:
             self.show_main_workspace_menu()
 
         if not shares:
-            tk.Label(cards_body, text="선택 가능한 워크스페이스가 없습니다.", bg="white", fg="#666666", font=("Segoe UI", 11)).pack(anchor="w", pady=(8, 0))
-            return
+            empty_label = tk.Label(
+                stack_surface,
+                text="선택 가능한 워크스페이스가 없습니다.",
+                bg="#f9f8ff",
+                fg="#666666",
+                font=("Segoe UI", 11),
+                anchor="w",
+            )
+            empty_label.pack(anchor="w", padx=24, pady=24)
+            workspace_stack = None
+        else:
+            workspace_stack = WorkspaceStack(stack_canvas, shares, on_open=enter_workspace, bg="#f9f8ff")
+            stack_body_id = stack_canvas.create_window((0, 0), window=workspace_stack, anchor="nw")
+            scroll_state = {
+                "target": 0.0,
+                "current": 0.0,
+                "job": None,
+                "dragging": False,
+                "last_y": None,
+                "moved": False,
+            }
 
-        for workspace_name in shares:
-            card = WorkspaceCard(cards_body, workspace_name, on_click=enter_workspace)
-            card.pack(fill="x", pady=6)
-            workspace_cards[workspace_name] = card
+            def sync_stack_region(total_height=None):
+                body_height = total_height if total_height is not None else workspace_stack.winfo_reqheight()
+                stack_canvas.configure(scrollregion=(0, 0, stack_canvas.winfo_width(), body_height + 12))
 
-            cached_meta = self.workspace_metadata_cache.get(workspace_name)
-            if cached_meta:
-                card.set_metadata(cached_meta)
+            def get_max_scroll():
+                stack_canvas.update_idletasks()
+                scroll_region = stack_canvas.cget("scrollregion")
+                if not scroll_region:
+                    return 0.0
+                _x0, _y0, _x1, y1 = [float(value) for value in str(scroll_region).split()]
+                viewport = float(stack_canvas.winfo_height())
+                return max(0.0, y1 - viewport)
+
+            def apply_scroll_offset(offset):
+                max_scroll = get_max_scroll()
+                if max_scroll <= 0:
+                    stack_canvas.yview_moveto(0.0)
+                    return
+                clamped = max(0.0, min(max_scroll, offset))
+                scroll_state["current"] = clamped
+                stack_canvas.yview_moveto(clamped / max_scroll)
+
+            def animate_scroll():
+                scroll_state["job"] = None
+                current = scroll_state["current"]
+                target = scroll_state["target"]
+                next_value = current + (target - current) * 0.24
+                if abs(next_value - target) < 0.6:
+                    next_value = target
+                apply_scroll_offset(next_value)
+                if abs(scroll_state["current"] - scroll_state["target"]) >= 0.6:
+                    scroll_state["job"] = self.root.after(16, animate_scroll)
+
+            def schedule_scroll_animation():
+                if scroll_state["job"] is None:
+                    scroll_state["job"] = self.root.after(16, animate_scroll)
+
+            def add_scroll_delta(delta_pixels):
+                max_scroll = get_max_scroll()
+                if max_scroll <= 0:
+                    return
+                scroll_state["target"] = max(0.0, min(max_scroll, scroll_state["target"] + delta_pixels))
+                schedule_scroll_animation()
+
+            def on_stack_mousewheel(event):
+                delta = event.delta
+                if delta == 0:
+                    return "break"
+                add_scroll_delta(-delta / 120.0 * 44.0)
+                return "break"
+
+            def on_drag_press(event):
+                scroll_state["dragging"] = True
+                scroll_state["last_y"] = event.y_root
+                scroll_state["moved"] = False
+
+            def on_drag_motion(event):
+                if not scroll_state["dragging"] or scroll_state["last_y"] is None:
+                    return
+                delta_y = event.y_root - scroll_state["last_y"]
+                scroll_state["last_y"] = event.y_root
+                if abs(delta_y) > 0:
+                    scroll_state["moved"] = True
+                    add_scroll_delta(-delta_y * 1.35)
+
+            def on_drag_release(_event):
+                scroll_state["dragging"] = False
+                scroll_state["last_y"] = None
+                self.root.after(0, lambda: scroll_state.__setitem__("moved", False))
+
+            def bind_scroll_gestures(widget):
+                widget.bind("<MouseWheel>", on_stack_mousewheel, add="+")
+                widget.bind("<ButtonPress-1>", on_drag_press, add="+")
+                widget.bind("<B1-Motion>", on_drag_motion, add="+")
+                widget.bind("<ButtonRelease-1>", on_drag_release, add="+")
+                for child in widget.winfo_children():
+                    bind_scroll_gestures(child)
+
+            workspace_stack.on_layout = lambda height: sync_stack_region(height)
+            def on_stack_configure(event):
+                stack_canvas.itemconfigure(stack_body_id, width=int(event.width * 0.91))
+                stack_canvas.coords(stack_body_id, max(0, int((event.width - (event.width * 0.91)) / 2)), 0)
+                sync_stack_region()
+                apply_scroll_offset(scroll_state["current"])
+
+            stack_canvas.bind("<Configure>", on_stack_configure)
+            bind_scroll_gestures(workspace_stack)
+            bind_scroll_gestures(stack_canvas)
+
+            for workspace_name in shares:
+                cached_meta = self.workspace_metadata_cache.get(workspace_name)
+                if cached_meta:
+                    workspace_stack.set_card_metadata(workspace_name, cached_meta)
+
+        def redraw_list_shell(event=None):
+            width = max(200, list_shell.winfo_width())
+            height = max(200, list_shell.winfo_height())
+            list_shell.itemconfigure(surface_window, width=max(180, width - 6), height=max(180, height - 2))
+            list_shell.coords(surface_window, 0, 0)
+            list_shell.tag_raise(surface_window)
+
+        list_shell.bind("<Configure>", redraw_list_shell)
 
         to_load = [name for name in shares if name not in self.workspace_metadata_cache]
         if not to_load:
@@ -889,9 +1057,8 @@ class SequenceArchiverApp:
                 self.workspace_metadata_cache[workspace_name] = meta
 
                 def apply_metadata(name=workspace_name, metadata=meta):
-                    card = workspace_cards.get(name)
-                    if card and card.winfo_exists():
-                        card.set_metadata(metadata)
+                    if workspace_stack and workspace_stack.winfo_exists():
+                        workspace_stack.set_card_metadata(name, metadata)
 
                 self.root.after(0, apply_metadata)
 
@@ -910,35 +1077,211 @@ class SequenceArchiverApp:
         tk.Label(header, text=f"매핑 드라이브: {state.active_workspace_drive or '매핑 안 됨'}", bg="white", anchor="w").pack(fill="x", pady=2)
         tk.Label(header, text=f"연결 상태: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
 
+    def _create_workspace_shell(self):
+        self._resize(860, 720)
+        self.root.title("애플망고 DMS - 워크스페이스")
+        self.clear_screen()
+        self.root.configure(bg="#f6f8ff")
+
+        bg = tk.Canvas(self.root, bg="#f6f8ff", highlightthickness=0, bd=0)
+        bg.pack(fill="both", expand=True)
+
+        main_card = self.create_login_card(
+            bg,
+            width=790,
+            height=628,
+            fill_top="#ffffff",
+            fill_bottom="#eef3ff",
+            radius=18,
+        )
+        content = main_card["content"]
+        redraw = main_card["redraw"]
+
+        def on_bg_resize(event):
+            self._draw_login_gradient(event.width, event.height)
+            redraw(event.width // 2, event.height // 2)
+
+        bg.bind("<Configure>", on_bg_resize)
+
+        content.configure(bg="#f9faff")
+        shell = tk.Frame(content, bg="#f9faff")
+        shell.pack(fill="both", expand=True)
+
+        header = tk.Frame(shell, bg="#f9faff")
+        header.pack(fill="x", pady=(0, 10))
+
+        left = tk.Frame(header, bg="#f9faff")
+        left.pack(side="left", fill="x", expand=True)
+
+        workspace_name = state.active_workspace or "워크스페이스"
+        welcome_name = state.session_account_name or state.session_username or "사용자"
+
+        tk.Label(left, text="\U0001F4C1", font=("Segoe UI Emoji", 18), fg="#36a34a", bg="#f9faff").pack(side="left", padx=(2, 10), pady=(0, 0))
+        title_block = tk.Frame(left, bg="#f9faff")
+        title_block.pack(side="left", fill="x", expand=True)
+        tk.Label(title_block, text=workspace_name, font=("Segoe UI", 18, "bold"), fg="#06012a", bg="#f9faff", anchor="w").pack(anchor="w")
+        tk.Label(title_block, text=f"환영합니다, {welcome_name}님", font=("Segoe UI", 9), fg="#8d90a6", bg="#f9faff", anchor="w").pack(anchor="w", pady=(2, 0))
+
+        right = tk.Frame(header, bg="#f9faff")
+        right.pack(side="right", anchor="ne")
+        info_row = tk.Frame(right, bg="#f9faff")
+        info_row.pack(anchor="e")
+        tk.Label(
+            info_row,
+            text=f"서버: {config.default_server_name}  |  사용자: {welcome_name}",
+            font=("Segoe UI", 9, "bold"),
+            fg="#58607c",
+            bg="#f9faff",
+        ).pack(side="left", padx=(0, 10))
+        tk.Frame(info_row, bg="#d8ddee", width=1, height=16).pack(side="left", padx=(0, 10))
+        logout_btn = tk.Button(
+            info_row,
+            text="\u21aa",
+            font=("Segoe UI Symbol", 13, "bold"),
+            bg="#ffffff",
+            fg="#2c334d",
+            activebackground="#eef2fb",
+            activeforeground="#111318",
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#dde3f2",
+            cursor="hand2",
+            command=self.logout_and_return_to_login,
+            width=2,
+            padx=2,
+            pady=0,
+        )
+        logout_btn.pack(side="left")
+
+        tk.Frame(shell, bg="#dfe5f2", height=1).pack(fill="x", pady=(0, 10))
+
+        body = tk.Frame(shell, bg="#f9faff")
+        body.pack(fill="both", expand=True)
+
+        sidebar = tk.Frame(body, bg="#f6f8fe", width=186, highlightthickness=1, highlightbackground="#e3e7f3")
+        sidebar.pack(side="left", fill="y")
+        tk.Frame(body, bg="#dfe5f2", width=1).pack(side="left", fill="y")
+        content_area = tk.Frame(body, bg="#fbfbff")
+        content_area.pack(side="left", fill="both", expand=True)
+
+        return {
+            "bg": bg,
+            "card": main_card,
+            "content": content_area,
+            "sidebar": sidebar,
+            "shell": shell,
+            "header": header,
+            "body": body,
+        }
+
+    def _build_sidebar_nav(self, parent, active_key, items):
+        rows = []
+
+        def build_row(key, icon, title, desc, command, icon_fg, active_bg):
+            is_active = key == active_key
+            base_bg = parent.cget("bg")
+            hover_bg = "#edf4ff"
+            card_bg = active_bg if is_active else "#ffffff"
+
+            outer = tk.Frame(parent, bg=base_bg)
+            outer.pack(fill="x", padx=12, pady=6)
+
+            card = tk.Frame(
+                outer,
+                bg=card_bg,
+                highlightthickness=1,
+                highlightbackground="#dfe5f0" if not is_active else "#c8d9fb",
+                bd=0,
+                cursor="hand2",
+            )
+            card.pack(fill="x", padx=0, pady=0)
+            card.pack_propagate(False)
+
+            def activate(_event=None):
+                command()
+
+            def apply_style(mode="normal"):
+                nonlocal is_active
+                if mode == "active":
+                    bg_color = active_bg
+                    border = "#c8d9fb"
+                    icon_color = icon_fg
+                    title_color = "#173778"
+                    desc_color = "#5f6787"
+                elif mode == "hover":
+                    bg_color = hover_bg
+                    border = "#d5e1f7"
+                    icon_color = icon_fg
+                    title_color = "#173778"
+                    desc_color = "#5f6787"
+                else:
+                    bg_color = card_bg
+                    border = "#dfe5f0"
+                    icon_color = icon_fg
+                    title_color = "#1c223d"
+                    desc_color = "#7f879f"
+
+                card.configure(bg=bg_color, highlightbackground=border)
+                icon_label.configure(bg=bg_color, fg=icon_color)
+                text_block.configure(bg=bg_color)
+                title_label.configure(bg=bg_color, fg=title_color)
+                desc_label.configure(bg=bg_color, fg=desc_color)
+
+            icon_label = tk.Label(card, text=icon, font=("Segoe UI Symbol", 16, "bold"), bg=card.cget("bg"), fg=icon_fg)
+            icon_label.pack(side="left", padx=(10, 10), pady=11)
+
+            text_block = tk.Frame(card, bg=card.cget("bg"))
+            text_block.pack(side="left", fill="both", expand=True, pady=10)
+            title_label = tk.Label(text_block, text=title, font=("Segoe UI", 10, "bold"), bg=card.cget("bg"), fg="#1c223d", anchor="w")
+            title_label.pack(anchor="w")
+            desc_label = tk.Label(text_block, text=desc, font=("Segoe UI", 8), bg=card.cget("bg"), fg="#7f879f", anchor="w", justify="left")
+            desc_label.pack(anchor="w", pady=(2, 0))
+
+            for widget in (outer, card, icon_label, text_block):
+                widget.bind("<Button-1>", activate, add="+")
+            for child in text_block.winfo_children():
+                child.bind("<Button-1>", activate, add="+")
+
+            card.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+            card.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+            outer.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+            outer.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+            icon_label.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+            icon_label.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+            text_block.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+            text_block.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+
+            rows.append(card)
+            apply_style("active" if is_active else "normal")
+            return card
+
+        for key, icon, title, desc, command, icon_fg in items:
+            build_row(
+                key,
+                icon,
+                title,
+                desc,
+                command,
+                icon_fg,
+                active_bg="#eaf2ff",
+            )
+
+        return rows
+
     def show_main_workspace_menu(self):
         if not state.active_workspace:
             self.show_workspace_selection_screen()
             return
 
-        self._resize(500, 480)
-        self.root.title("애플망고 DMS - 워크스페이스 메뉴")
-        self.clear_screen()
+        self.show_save_files_screen()
 
-        page = tk.Frame(self.root, bg="white", padx=24, pady=20)
-        page.pack(fill="both", expand=True)
-        self.build_header(page, "워크스페이스 메뉴")
-
-        button_frame = tk.Frame(page, bg="white")
-        button_frame.pack(pady=(8, 0))
-
-        def menu_btn(label, command, color="#d9d9d9", fg="black"):
-            tk.Button(
-                button_frame, text=label, width=22,
-                bg=color, activebackground="#c0c0c0",
-                fg=fg, activeforeground=fg,
-                relief="flat", bd=0, highlightthickness=0,
-                cursor="hand2", command=command,
-            ).pack(pady=4)
-
-        menu_btn("파일 저장", self.show_save_files_screen)
-        menu_btn("파일 검색", self.show_search_files_screen)
-        menu_btn("워크스페이스 종료", self.show_workspace_selection_screen)
-        menu_btn("로그아웃", self.logout_and_return_to_login)
+    def _build_workspace_page_header(self, parent, title, subtitle):
+        header = tk.Frame(parent, bg="#fbfbff")
+        header.pack(fill="x", pady=(0, 12))
+        tk.Label(header, text=title, font=("Segoe UI", 17, "bold"), fg="#1f2540", bg="#fbfbff", anchor="w").pack(fill="x", pady=(0, 2))
+        tk.Label(header, text=subtitle, font=("Segoe UI", 10), fg="#77809a", bg="#fbfbff", anchor="w").pack(fill="x")
+        return header
 
     def build_destination_drive_path(self):
         drive = normalize_drive_letter(state.active_workspace_drive)
@@ -947,26 +1290,27 @@ class SequenceArchiverApp:
         return Path(f"{drive}\\")
 
     def show_save_files_screen(self):
-        self._resize(760, 680)
+        shell = self._create_workspace_shell()
         self.root.title("애플망고 DMS - 파일 저장")
-        self.clear_screen()
 
-        # ---- outer frame: fixed header + scrollable body ----
-        outer = tk.Frame(self.root, bg="white")
-        outer.pack(fill="both", expand=True)
+        self._build_sidebar_nav(
+            shell["sidebar"],
+            "save",
+            [
+                ("save", "\u2b06", "파일 저장", "새 파일을 업로드하거나 기존 파일을 저장합니다.", self.show_save_files_screen, "#2f6fff"),
+                ("search", "\u2315", "파일 검색", "지정한 파일을 검색하고 열람합니다.", self.show_search_files_screen, "#1f2a44"),
+                ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고 목록으로 돌아갑니다.", self.show_workspace_exit_screen, "#ff4f4f"),
+            ],
+        )
 
-        header_frame = tk.Frame(outer, bg="white", padx=14, pady=8)
-        header_frame.pack(fill="x")
-        self.build_header(header_frame, "파일 저장")
+        outer = shell["content"]
+        self._build_workspace_page_header(outer, "파일 저장", "파일을 드래그 앤 드롭하거나, 아래 버튼을 클릭하여 파일을 선택하세요.")
 
         # scrollable canvas
-        scroll_canvas = tk.Canvas(outer, bg="white", highlightthickness=0)
-        v_scroll = ttk.Scrollbar(outer, orient="vertical", command=scroll_canvas.yview)
-        scroll_canvas.configure(yscrollcommand=v_scroll.set)
-        v_scroll.pack(side="right", fill="y")
-        scroll_canvas.pack(side="left", fill="both", expand=True)
+        scroll_canvas = tk.Canvas(outer, bg="#fbfbff", highlightthickness=0)
+        scroll_canvas.pack(fill="both", expand=True)
 
-        inner = tk.Frame(scroll_canvas, bg="white", padx=14, pady=8)
+        inner = tk.Frame(scroll_canvas, bg="#fbfbff", padx=10, pady=8)
         inner_id = scroll_canvas.create_window((0, 0), window=inner, anchor="nw")
 
         def _on_inner_resize(event):
@@ -987,22 +1331,24 @@ class SequenceArchiverApp:
         doc_type_var = tk.StringVar(value=("기타" if "기타" in doc_types else doc_types[0]))
 
         # ---- A. Add Files ----
-        row_a = tk.LabelFrame(inner, text="A. 파일 추가", bg="white", padx=10, pady=8)
-        row_a.pack(fill="x", pady=(0, 8))
+        row_a = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=10, pady=8)
+        row_a.pack(fill="x", pady=(0, 10))
 
         add_buttons = tk.Frame(row_a, bg="white")
         add_buttons.pack(fill="x", pady=(0, 8))
 
-        drop_area = tk.Canvas(row_a, height=60, bg="white", highlightthickness=0, bd=0, cursor="hand2")
-        drop_area.pack(fill="x", pady=(0, 6))
-        drop_area.create_rectangle(4, 4, 700, 56, dash=(3, 3), outline="#9a9a9a", width=1)
-        drop_area.create_text(352, 30, text="클릭해서 파일 추가 또는 파일/폴더를 여기로 드롭",
-                              fill="#666666", font=("Segoe UI", 10))
+        drop_area = tk.Canvas(row_a, height=138, bg="#fbfbff", highlightthickness=0, bd=0, cursor="hand2")
+        drop_area.pack(fill="x", pady=(0, 8))
+        drop_area.create_rectangle(4, 4, 720, 134, dash=(3, 3), outline="#b6c6ea", width=1)
+        drop_area.create_text(360, 46, text="\U0001F4E4", fill="#6ea7ff", font=("Segoe UI Emoji", 28))
+        drop_area.create_text(360, 78, text="파일을 여기에 드래그 앤 드롭하세요", fill="#1f2540", font=("Segoe UI", 11, "bold"))
+        drop_area.create_text(360, 102, text="또는", fill="#7b839a", font=("Segoe UI", 9))
+        drop_area.create_text(360, 124, text="파일 선택", fill="#2f6fff", font=("Segoe UI", 10, "bold"))
 
         file_count_var = tk.StringVar(value="선택된 파일 0개")
-        tk.Label(row_a, textvariable=file_count_var, bg="white", fg="#555555", anchor="w").pack(fill="x", pady=(0, 3))
+        tk.Label(row_a, textvariable=file_count_var, bg="#fbfbff", fg="#555555", anchor="w", font=("Segoe UI", 9)).pack(fill="x", pady=(0, 3))
 
-        file_table_frame = tk.Frame(row_a, bg="white")
+        file_table_frame = tk.Frame(row_a, bg="#fbfbff")
         file_table_frame.pack(fill="x")
 
         file_tree = ttk.Treeview(file_table_frame, columns=("name", "source", "preview"), show="headings", height=6)
@@ -1019,10 +1365,10 @@ class SequenceArchiverApp:
         file_tree.configure(yscrollcommand=file_scroll.set)
 
         # ---- B. Metadata / Tags ----
-        row_b = tk.LabelFrame(inner, text="B. 메타데이터 / 태그", bg="white", padx=10, pady=8)
-        row_b.pack(fill="x", pady=(0, 8))
+        row_b = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=10, pady=8)
+        row_b.pack(fill="x", pady=(0, 10))
 
-        grid = tk.Frame(row_b, bg="white")
+        grid = tk.Frame(row_b, bg="#fbfbff")
         grid.pack(fill="x")
 
         tk.Label(grid, text="날짜 (YYYY-MM-DD)", bg="white", width=20, anchor="w").grid(row=0, column=0, sticky="w", pady=2)
@@ -1041,29 +1387,29 @@ class SequenceArchiverApp:
         tk.Entry(grid, textvariable=tags_var, width=50).grid(row=4, column=1, sticky="w", pady=2)
 
         tk.Label(row_b, text="예: 봄학기, 3학년, 운영회의",
-                 bg="white", fg="#666666", anchor="w").pack(fill="x", pady=(4, 0))
+             bg="#fbfbff", fg="#666666", anchor="w", font=("Segoe UI", 9)).pack(fill="x", pady=(4, 0))
 
         # ---- C. Filename Preview ----
-        row_c = tk.LabelFrame(inner, text="C. 파일명 미리보기", bg="white", padx=10, pady=8)
-        row_c.pack(fill="x", pady=(0, 8))
+        row_c = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=10, pady=8)
+        row_c.pack(fill="x", pady=(0, 10))
         tk.Label(
             row_c,
             text="형식: YYYY-MM-DD__문서유형__태그__원본파일명.ext  (태그가 비어 있으면 생략)",
-            bg="white", anchor="w", justify="left",
+            bg="#fbfbff", anchor="w", justify="left", fg="#66708b", font=("Segoe UI", 9),
         ).pack(fill="x")
 
         # ---- D. Save ----
-        row_d = tk.LabelFrame(inner, text="D. 저장", bg="white", padx=10, pady=8)
-        row_d.pack(fill="x", pady=(0, 8))
+        row_d = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=10, pady=8)
+        row_d.pack(fill="x", pady=(0, 10))
 
-        control_row = tk.Frame(row_d, bg="white")
+        control_row = tk.Frame(row_d, bg="#fbfbff")
         control_row.pack(fill="x", pady=(0, 8))
         tk.Button(control_row, text="파일 저장", width=16, bg="#4caf50", fg="white",
                   activebackground="#43a047", relief="flat", bd=0, cursor="hand2",
                   command=lambda: save_files()).pack(side="left")
 
-        tk.Label(row_d, text="작업 로그", bg="white", anchor="w").pack(fill="x")
-        activity_frame = tk.Frame(row_d, bg="white")
+        tk.Label(row_d, text="작업 로그", bg="#fbfbff", anchor="w", font=("Segoe UI", 10, "bold"), fg="#1f2540").pack(fill="x")
+        activity_frame = tk.Frame(row_d, bg="#fbfbff")
         activity_frame.pack(fill="x")
 
         activity_text = tk.Text(activity_frame, height=7, wrap="word", state="disabled")
@@ -1247,25 +1593,26 @@ class SequenceArchiverApp:
         refresh_file_table()
 
     def show_search_files_screen(self):
-        self._resize(760, 680)
+        shell = self._create_workspace_shell()
         self.root.title("애플망고 DMS - 파일 검색")
-        self.clear_screen()
 
-        # ---- outer frame: fixed header + scrollable body ----
-        outer = tk.Frame(self.root, bg="white")
-        outer.pack(fill="both", expand=True)
+        self._build_sidebar_nav(
+            shell["sidebar"],
+            "search",
+            [
+                ("save", "\u2b06", "파일 저장", "새 파일을 업로드하거나 기존 파일을 저장합니다.", self.show_save_files_screen, "#1f2a44"),
+                ("search", "\u2315", "파일 검색", "지정한 파일을 검색하고 열람합니다.", self.show_search_files_screen, "#2f6fff"),
+                ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고 목록으로 돌아갑니다.", self.show_workspace_exit_screen, "#ff4f4f"),
+            ],
+        )
 
-        header_frame = tk.Frame(outer, bg="white", padx=14, pady=8)
-        header_frame.pack(fill="x")
-        self.build_header(header_frame, "파일 검색")
+        outer = shell["content"]
+        self._build_workspace_page_header(outer, "파일 검색", "지정한 파일을 검색하고 바로 열람하세요.")
 
-        scroll_canvas = tk.Canvas(outer, bg="white", highlightthickness=0)
-        v_scroll = ttk.Scrollbar(outer, orient="vertical", command=scroll_canvas.yview)
-        scroll_canvas.configure(yscrollcommand=v_scroll.set)
-        v_scroll.pack(side="right", fill="y")
-        scroll_canvas.pack(side="left", fill="both", expand=True)
+        scroll_canvas = tk.Canvas(outer, bg="#fbfbff", highlightthickness=0)
+        scroll_canvas.pack(fill="both", expand=True)
 
-        inner = tk.Frame(scroll_canvas, bg="white", padx=14, pady=8)
+        inner = tk.Frame(scroll_canvas, bg="#fbfbff", padx=10, pady=8)
         inner_id = scroll_canvas.create_window((0, 0), window=inner, anchor="nw")
 
         def _on_inner_resize(event):
@@ -1334,29 +1681,29 @@ class SequenceArchiverApp:
             return year
 
         # ---- Search Filters box (contains Search + Clear buttons) ----
-        filters = tk.LabelFrame(inner, text="검색 필터", bg="white", padx=10, pady=8)
-        filters.pack(fill="x", pady=(0, 8))
+        filters = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=10, pady=8)
+        filters.pack(fill="x", pady=(0, 10))
 
-        tk.Label(filters, text="워크스페이스", bg="white", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
+        tk.Label(filters, text="워크스페이스", bg="#fbfbff", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=3)
         tk.Entry(filters, textvariable=workspace_var, width=36, state="readonly").grid(row=0, column=1, columnspan=3, sticky="w", pady=3)
 
-        tk.Label(filters, text="날짜 (YYYY/MM/DD)", bg="white", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
+        tk.Label(filters, text="날짜 (YYYY/MM/DD)", bg="#fbfbff", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=3)
         tk.Entry(filters, textvariable=date_entry_var, width=16).grid(row=1, column=1, sticky="w", pady=3)
         tk.Label(filters, text="예: 2024/06/15 또는 2024/06 또는 2024",
-                 bg="white", fg="#888888", font=("Segoe UI", 8)).grid(row=1, column=2, columnspan=2, sticky="w", padx=(6, 0))
+             bg="#fbfbff", fg="#888888", font=("Segoe UI", 8)).grid(row=1, column=2, columnspan=2, sticky="w", padx=(6, 0))
 
-        tk.Label(filters, text="문서 유형", bg="white", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
+        tk.Label(filters, text="문서 유형", bg="#fbfbff", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
         ttk.Combobox(filters, textvariable=doc_type_var,
                  values=["전체"] + self.db.get_document_types(),
                      state="readonly", width=24).grid(row=2, column=1, sticky="w", pady=3)
 
-        tk.Label(filters, text="태그", bg="white", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
+        tk.Label(filters, text="태그", bg="#fbfbff", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
         tk.Entry(filters, textvariable=tags_var, width=42).grid(row=3, column=1, columnspan=3, sticky="w", pady=3)
 
-        tk.Label(filters, text="자유 검색어", bg="white", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
+        tk.Label(filters, text="자유 검색어", bg="#fbfbff", width=16, anchor="w").grid(row=4, column=0, sticky="w", pady=3)
         tk.Entry(filters, textvariable=free_var, width=42).grid(row=4, column=1, columnspan=3, sticky="w", pady=3)
 
-        filter_btn_row = tk.Frame(filters, bg="white")
+        filter_btn_row = tk.Frame(filters, bg="#fbfbff")
         filter_btn_row.grid(row=5, column=0, columnspan=5, sticky="w", pady=(8, 2))
 
         # 검색 버튼은 항상 활성
@@ -1372,8 +1719,8 @@ class SequenceArchiverApp:
         clear_btn.pack(side="left", padx=(8, 0))
 
         # ---- Results box (x + y scrollbars, multi-select) ----
-        results_frame = tk.LabelFrame(inner, text="검색 결과", bg="white", padx=4, pady=6)
-        results_frame.pack(fill="x", pady=(0, 8))
+        results_frame = tk.Frame(inner, bg="#fbfbff", highlightthickness=1, highlightbackground="#e6eaf4", padx=4, pady=6)
+        results_frame.pack(fill="x", pady=(0, 10))
 
         cols = ("archive_date", "document_type", "tags", "archived_filename", "uploaded_by", "size", "full_path")
         table = ttk.Treeview(results_frame, columns=cols, show="headings", height=14, selectmode="extended")
@@ -1406,7 +1753,7 @@ class SequenceArchiverApp:
         results_frame.grid_columnconfigure(0, weight=1)
 
         # ---- bottom action buttons ----
-        action_row = tk.Frame(inner, bg="white")
+        action_row = tk.Frame(inner, bg="#fbfbff")
         action_row.pack(fill="x", pady=(0, 8))
 
         open_file_btn = tk.Button(action_row, text="파일 열기", width=14,
@@ -1464,6 +1811,60 @@ class SequenceArchiverApp:
             if stale_paths:
                 self.db.delete_file_records_by_paths(state.active_workspace, stale_paths)
             _update_action_buttons()
+
+        def show_workspace_exit_screen(self):
+            shell = self._create_workspace_shell()
+            self.root.title("애플망고 DMS - 워크스페이스 나가기")
+
+            self._build_sidebar_nav(
+                shell["sidebar"],
+                "exit",
+                [
+                    ("save", "\u2b06", "파일 저장", "새 파일을 업로드하거나 기존 파일을 저장합니다.", self.show_save_files_screen, "#1f2a44"),
+                    ("search", "\u2315", "파일 검색", "지정한 파일을 검색하고 열람합니다.", self.show_search_files_screen, "#1f2a44"),
+                    ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고 목록으로 돌아갑니다.", self.show_workspace_exit_screen, "#ff4f4f"),
+                ],
+            )
+
+            outer = shell["content"]
+            self._build_workspace_page_header(outer, "워크스페이스 나가기", "현재 작업을 마치고 워크스페이스 목록으로 돌아갑니다.")
+
+            card = tk.Frame(outer, bg="#ffffff", highlightthickness=1, highlightbackground="#e5e9f4", padx=18, pady=18)
+            card.pack(fill="x", pady=(6, 0))
+
+            top = tk.Frame(card, bg="#ffffff")
+            top.pack(fill="x")
+            tk.Label(top, text="\u26a0", font=("Segoe UI Symbol", 24, "bold"), fg="#ff4f4f", bg="#ffffff").pack(side="left", padx=(0, 12))
+            msg = tk.Frame(top, bg="#ffffff")
+            msg.pack(side="left", fill="x", expand=True)
+            tk.Label(msg, text="워크스페이스에서 나가시겠습니까?", font=("Segoe UI", 12, "bold"), fg="#1f2540", bg="#ffffff", anchor="w").pack(anchor="w")
+            tk.Label(msg, text="지금 열려 있는 저장/검색 화면을 닫고 워크스페이스 선택 화면으로 돌아갑니다.", font=("Segoe UI", 9), fg="#68728f", bg="#ffffff", anchor="w", justify="left").pack(anchor="w", pady=(4, 0))
+
+            action_row = tk.Frame(card, bg="#ffffff")
+            action_row.pack(fill="x", pady=(18, 0))
+            tk.Button(
+                action_row,
+                text="돌아가기",
+                width=14,
+                bg="#d9d9d9",
+                activebackground="#c0c0c0",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                command=self.show_main_workspace_menu,
+            ).pack(side="left")
+            tk.Button(
+                action_row,
+                text="나가기",
+                width=14,
+                bg="#ff4f4f",
+                fg="white",
+                activebackground="#e64545",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                command=self.show_workspace_selection_screen,
+            ).pack(side="left", padx=(8, 0))
 
         def clear_filters_only():
             # 필터만 초기화
