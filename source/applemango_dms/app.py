@@ -46,6 +46,7 @@ from applemango_dms.services.nas import (
     check_server_availability,
     check_local_network_connectivity,
     discover_server_shares,
+    normalize_drive_letter,
 )
 
 from applemango_dms.services.workspace import (
@@ -58,6 +59,10 @@ from applemango_dms.services.filenames import (
 
 from applemango_dms.ui.widgets import (
     WorkspaceCard,
+)
+
+from applemango_dms.ui.settings import (
+    show_mapped_drives_window,
 )
 
 from applemango_dms.utils.windows import (
@@ -200,15 +205,26 @@ class SequenceArchiverApp:
         return image.resize(new_size, Image.LANCZOS)
 
     def _load_logo_photo(self, max_width, max_height):
-        if Image is None or ImageTk is None or not config.logo_path.exists():
+        if Image is None or ImageTk is None:
             return None
 
-        try:
-            image = Image.open(config.logo_path)
-            resized = self._resize_image_fit(image, max_width=max_width, max_height=max_height)
-            return ImageTk.PhotoImage(resized)
-        except Exception:
-            return None
+        candidate_paths = [
+            Path(config.logo_path),
+            config.PROJECT_ROOT / "assets" / "images" / "applemango_logo.png",
+            config.PROJECT_ROOT / "assets" / "images" / "hiscom_logo.png",
+        ]
+
+        for path in candidate_paths:
+            if not path.exists():
+                continue
+            try:
+                image = Image.open(path)
+                resized = self._resize_image_fit(image, max_width=max_width, max_height=max_height)
+                return ImageTk.PhotoImage(resized)
+            except Exception:
+                continue
+
+        return None
 
     def _set_login_connectivity_status(self, connected, text):
         dot_canvas = self.login_connectivity.get("dot_canvas")

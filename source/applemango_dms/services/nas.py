@@ -1,7 +1,9 @@
+import ctypes
 import re
 import socket
 import subprocess
 from pathlib import Path
+from ctypes import wintypes
 
 from applemango_dms.config import (
     allowed_mapping_letters,

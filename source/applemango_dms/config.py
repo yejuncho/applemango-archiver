@@ -6,7 +6,13 @@ allowed_mapping_letters = list("ABDEFHIJKLMNOPQRSTUVWXYZ")
 default_server_port = 445
 credential_store_path = Path.home() / ".applemango_archiver_credentials.json"
 archive_db_path = Path.home() / ".applemango_archiver" / "archive.db"
-logo_path = Path(__file__).resolve().parents[2] / "assets" / "image" / "hiscom_logo.png"
+
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_SOURCE_DIR = PACKAGE_DIR.parent
+PROJECT_ROOT = PROJECT_SOURCE_DIR.parent
+
+logo_path = PROJECT_ROOT / "assets" / "images" / "applemango_logo.png"
+    
 DEFAULT_DOCUMENT_TYPES = [
     "계약서",
     "청구서",

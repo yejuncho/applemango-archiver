@@ -1,3 +1,6 @@
+import json
+import subprocess
+
 from applemango_dms.config import credential_store_path, default_server_name
 from applemango_dms import state
 
@@ -48,17 +51,13 @@ def authenticate_to_server(username, password):
     return False, err
 
 def update_session_login(username, password):
-    global session_logged_in, session_username, session_password, session_account_name
-
-    session_logged_in = True
-    session_username = username.strip()
-    session_password = password
-    session_account_name = extract_account_name(username)
+    state.session_logged_in = True
+    state.session_username = username.strip()
+    state.session_password = password
+    state.session_account_name = extract_account_name(username)
 
 def clear_session_login():
-    global session_logged_in, session_username, session_password, session_account_name
-
-    session_logged_in = False
-    session_username = ""
-    session_password = ""
-    session_account_name = ""
+    state.session_logged_in = False
+    state.session_username = ""
+    state.session_password = ""
+    state.session_account_name = ""

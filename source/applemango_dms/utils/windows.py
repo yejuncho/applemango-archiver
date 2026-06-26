@@ -1,3 +1,5 @@
+import ctypes
+
 def apply_window_icon(window):
     # Clear title-bar icons on Windows so no default Tk icon is shown.
     def _clear_icon_handle():
