@@ -3,7 +3,7 @@ import tkinter as tk
 
 
 class WorkspaceCard(tk.Canvas):
-    def __init__(self, parent, workspace_name, on_select=None, on_open=None, surface_bg="#f9f8ff"):
+    def __init__(self, parent, workspace_name, on_select=None, on_open=None, surface_bg="#f9f8ff", meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
         self._card_height = 216
         super().__init__(
             parent,
@@ -19,6 +19,10 @@ class WorkspaceCard(tk.Canvas):
         self.on_select = on_select
         self.on_open = on_open
         self.surface_bg = surface_bg
+        self.card_fill_bg = surface_bg
+        self.meta_icon_photos = meta_icon_photos or {}
+        self.folder_icon_photo = folder_icon_photo
+        self.font_family = font_family
 
         self._select_progress = 0.0
         self._hover_progress = 0.0
@@ -29,24 +33,27 @@ class WorkspaceCard(tk.Canvas):
         self._press_x_root = None
         self._dragged = False
 
-        self.content = tk.Frame(self, bg="#fcfbff")
+        self.content = tk.Frame(self, bg=self.surface_bg)
         self.content_id = self.create_window(16, 10, window=self.content, anchor="nw")
 
         self.folder_icon = tk.Label(
             self.content,
-            text="\U0001F4C1",
-            font=("Segoe UI Emoji", 13),
-            bg="#fcfbff",
+            bg=self.surface_bg,
             fg="#6ea7ff",
             anchor="w",
         )
+        if self.folder_icon_photo is not None:
+            self.folder_icon.configure(image=self.folder_icon_photo)
+            self.folder_icon.image = self.folder_icon_photo
+        else:
+            self.folder_icon.configure(text="\U0001F4C1", font=("Segoe UI Emoji", 13))
         self.folder_icon.place(x=12, y=13, width=24, height=24)
 
         self.title_label = tk.Label(
             self.content,
             text=workspace_name,
-            font=("Segoe UI", 15, "bold"),
-            bg="#fcfbff",
+            font=(self.font_family, 15, "bold"),
+            bg=self.surface_bg,
             fg="#151933",
             anchor="w",
         )
@@ -56,19 +63,25 @@ class WorkspaceCard(tk.Canvas):
             self.content,
             text="\u203A",
             font=("Segoe UI Symbol", 16, "bold"),
-            bg="#fcfbff",
+            bg=self.surface_bg,
             fg="#0f1115",
             anchor="e",
         )
         self.chevron_label.place(relx=1.0, x=-18, y=14, width=18, height=22)
 
-        self.meta_icon_labels = [
-            tk.Label(self.content, text=icon, font=("Segoe UI Emoji", 10), bg="#fcfbff", fg="#9ca3be", anchor="w")
-            for icon in ("\U0001F551", "\U0001F5C0", "\U0001F5CE")
-        ]
+        self.meta_icon_labels = []
+        for key, fallback in (("clock", "\U0001F551"), ("database", "\U0001F5C0"), ("file_stack", "\U0001F5CE")):
+            photo = self.meta_icon_photos.get(key)
+            label = tk.Label(self.content, bg=self.surface_bg, fg="#111111", anchor="w")
+            if photo is not None:
+                label.configure(image=photo)
+                label.image = photo
+            else:
+                label.configure(text=fallback, font=("Segoe UI Emoji", 10))
+            self.meta_icon_labels.append(label)
 
         self.meta_labels = [
-            tk.Label(self.content, text="", font=("Segoe UI", 9), bg="#fcfbff", fg="#6d7390", anchor="w")
+            tk.Label(self.content, text="", font=(self.font_family, 11), bg=self.surface_bg, fg="#111111", anchor="w")
             for _ in range(3)
         ]
         meta_positions = (74, 106, 138)
@@ -218,12 +231,12 @@ class WorkspaceCard(tk.Canvas):
 
         width = max(260, self.winfo_width())
         hover_mix = min(1.0, self._hover_progress * 0.50 + self._select_progress * 0.35)
-        fill = self._blend("#fcfbff", "#ffffff", hover_mix)
+        fill = self._blend(self.surface_bg, "#ffffff", hover_mix)
         border = self._blend("#e6e8f1", "#d8dced", hover_mix)
         shadow_a = self._blend("#ebeaf6", "#e3e1f2", hover_mix)
         shadow_b = self._blend("#dfddeb", "#d8d6e8", hover_mix)
         title_color = self._blend("#151933", "#0a0f24", self._select_progress * 0.45)
-        meta_color = self._blend("#6d7390", "#5e647e", self._select_progress * 0.35)
+        meta_color = self._blend("#111111", "#111111", self._select_progress * 0.35)
 
         self._smooth_rounded_rect(6, 8, width - 2, height - 2, 24, fill=shadow_b, outline="", tags="card")
         self._smooth_rounded_rect(3, 5, width - 5, height - 5, 24, fill=shadow_a, outline="", tags="card")
@@ -240,7 +253,7 @@ class WorkspaceCard(tk.Canvas):
         self.title_label.configure(bg=fill, fg=title_color)
         self.chevron_label.configure(bg=fill, fg="#0f1115")
         for label in self.meta_icon_labels:
-            label.configure(bg=fill, fg="#9ca3be")
+            label.configure(bg=fill, fg="#111111")
         for label in self.meta_labels:
             label.configure(bg=fill, fg=meta_color)
 
@@ -265,13 +278,17 @@ class WorkspaceCard(tk.Canvas):
 
 
 class WorkspaceStack(tk.Frame):
-    def __init__(self, parent, workspace_names, on_open=None, on_layout=None, bg="#f9f8ff"):
+    def __init__(self, parent, workspace_names, on_open=None, on_layout=None, bg="#ffffff", card_bg="#f8f9ff", meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
         super().__init__(parent, bg=bg, bd=0, highlightthickness=0)
         self.configure(height=1)
         self.pack_propagate(False)
 
         self.on_open = on_open
         self.on_layout = on_layout
+        self.card_bg = card_bg
+        self.meta_icon_photos = meta_icon_photos or {}
+        self.folder_icon_photo = folder_icon_photo
+        self.font_family = font_family
         self._top_pad = 8
         self._side_pad = 2
         self._stack_step = 73
@@ -286,7 +303,16 @@ class WorkspaceStack(tk.Frame):
         self.cards_by_name = {}
 
         for workspace_name in workspace_names:
-            card = WorkspaceCard(self, workspace_name, on_select=self.select_workspace, on_open=self._open_workspace, surface_bg=bg)
+            card = WorkspaceCard(
+                self,
+                workspace_name,
+                on_select=self.select_workspace,
+                on_open=self._open_workspace,
+                surface_bg=self.card_bg,
+                meta_icon_photos=self.meta_icon_photos,
+                folder_icon_photo=self.folder_icon_photo,
+                font_family=self.font_family,
+            )
             self.cards.append(card)
             self.cards_by_name[workspace_name] = card
 

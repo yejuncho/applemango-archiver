@@ -22,12 +22,12 @@ def show_mapped_drives_window(root):
     win.configure(bg="white")
     win.transient(root)
 
-    tk.Label(win, text="매핑된 네트워크 드라이브", font=("Segoe UI", 10, "bold"), bg="white").pack(pady=(10, 8))
+    tk.Label(win, text="매핑된 네트워크 드라이브", font=("TkDefaultFont", 10, "bold"), bg="white").pack(pady=(10, 8))
 
     frame = tk.Frame(win, bg="white")
     frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-    listbox = tk.Listbox(frame, font=("Segoe UI", 10), activestyle="none", selectmode="extended")
+    listbox = tk.Listbox(frame, font=("TkDefaultFont", 10), activestyle="none", selectmode="extended")
     listbox.pack(side="left", fill="both", expand=True)
 
     scroll = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)

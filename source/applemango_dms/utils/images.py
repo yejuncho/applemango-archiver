@@ -1,3 +1,4 @@
+from io import BytesIO
 from pathlib import Path
 
 try:
@@ -34,6 +35,25 @@ def load_logo_photo(logo_path, max_width, max_height):
 
     try:
         image = Image.open(path)
+        resized = resize_image_fit(image, max_width=max_width, max_height=max_height)
+        return ImageTk.PhotoImage(resized)
+    except Exception:
+        return None
+
+
+def load_svg_photo(svg_path, max_width, max_height, tint=None):
+    path = Path(svg_path)
+    if Image is None or ImageTk is None or not path.exists():
+        return None
+
+    try:
+        svg_source = path.read_text(encoding="utf-8")
+        if tint:
+            svg_source = svg_source.replace("currentColor", tint)
+
+        resvg = __import__("resvg_py")
+        png_bytes = resvg.svg_to_bytes(svg_string=svg_source)
+        image = Image.open(BytesIO(png_bytes))
         resized = resize_image_fit(image, max_width=max_width, max_height=max_height)
         return ImageTk.PhotoImage(resized)
     except Exception:
