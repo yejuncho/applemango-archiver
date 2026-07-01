@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import threading
+import random
 import tkinter as tk
 import tkinter.font as tkfont
 import ctypes
@@ -285,6 +286,41 @@ class SequenceArchiverApp:
                 continue
 
         return None
+
+    def _load_startup_logo_photo(self, max_width, max_height):
+        if Image is None or ImageTk is None:
+            return None
+
+        path = config.PROJECT_ROOT / "assets" / "images" / "hiscom.png"
+        if not path.exists():
+            return None
+
+        try:
+            image = Image.open(path)
+            resized = self._resize_image_fit(image, max_width=max_width, max_height=max_height)
+            return ImageTk.PhotoImage(resized)
+        except Exception:
+            return None
+
+    def _load_random_login_logo_photo(self, max_width, max_height):
+        if Image is None or ImageTk is None:
+            return None
+
+        image_root = config.PROJECT_ROOT / "assets" / "images"
+        png_paths = sorted(image_root.glob("*.png"))
+        if not png_paths:
+            return None
+
+        # Randomly pick from up to five PNG logo files in assets/images.
+        candidate_pool = png_paths[:5]
+        selected_path = random.choice(candidate_pool)
+
+        try:
+            image = Image.open(selected_path)
+            resized = self._resize_image_fit(image, max_width=max_width, max_height=max_height)
+            return ImageTk.PhotoImage(resized)
+        except Exception:
+            return None
 
     def _load_icon_photo(self, path, max_width, max_height):
         if not path.exists():
@@ -815,7 +851,7 @@ class SequenceArchiverApp:
         logo_label = tk.Label(shell, bg="white")
         logo_label.place(relx=0.5, rely=0.45, anchor="center")
 
-        logo_photo = self._load_logo_photo(max_width=300, max_height=180)
+        logo_photo = self._load_startup_logo_photo(max_width=300, max_height=180)
         self.startup_logo_image = logo_photo
         if logo_photo is not None:
             logo_label.configure(image=logo_photo)
@@ -830,7 +866,7 @@ class SequenceArchiverApp:
             self.show_login_screen()
             return
 
-        ok, _ = authenticate_to_server(saved["username"], saved["password"])
+        ok, err = authenticate_to_server(saved["username"], saved["password"])
         if ok:
             update_session_login(saved["username"], saved["password"])
             self.show_workspace_selection_screen()
@@ -838,7 +874,16 @@ class SequenceArchiverApp:
 
         clear_saved_credentials()
         clear_session_login()
-        self.show_login_screen()
+        self.show_login_screen(prefill_username=saved.get("username"))
+
+        startup_msg = "저장된 로그인으로 NAS 연결에 실패했습니다.\n아이디/패스워드를 다시 입력해 주세요."
+        if "1219" in str(err):
+            startup_msg = (
+                "이전 NAS 연결 정보와 충돌해 자동 로그인이 실패했습니다.\n"
+                "연결을 정리한 뒤 로그인 화면으로 이동했습니다.\n"
+                "아이디/패스워드를 다시 입력해 주세요."
+            )
+        messagebox.showinfo("자동 로그인 실패", startup_msg, parent=self.root)
 
     def show_login_screen(self, prefill_username=None):
         self._stop_login_connectivity_polling()
@@ -847,7 +892,7 @@ class SequenceArchiverApp:
         frame = tk.Frame(self.login_content, bg="#f9f8ff")
         frame.pack(fill="both", expand=True)
 
-        logo_photo = self._load_logo_photo(max_width=280, max_height=100)
+        logo_photo = self._load_random_login_logo_photo(max_width=280, max_height=100)
         self.logo_image = logo_photo
         if logo_photo is not None:
             tk.Label(frame, image=logo_photo, bg="#f9f8ff").pack(pady=(0, 8))
@@ -923,9 +968,17 @@ class SequenceArchiverApp:
                     or "unknown user name or bad password" in err
                     or "사용자 이름 또는 암호가 올바르지 않습니다" in err
                 )
+                is_connection_conflict = "1219" in err
 
                 if is_network_issue:
                     messagebox.showerror("로그인 실패", network_warning_msg, parent=self.root)
+                elif is_connection_conflict:
+                    messagebox.showerror(
+                        "로그인 실패",
+                        "기존 NAS 연결 정보와 충돌했습니다(1219).\n"
+                        "연결 정보를 정리한 뒤 다시 시도해 주세요.",
+                        parent=self.root,
+                    )
                 elif is_invalid_credentials:
                     messagebox.showerror("로그인 실패", "아이디/패스워드를 확인해주세요.", parent=self.root)
                 else:
@@ -1045,7 +1098,7 @@ class SequenceArchiverApp:
         tk.Label(
             left_header,
             text="워크스페이스를 선택해주세요.",
-            font=self._font(10),
+            font=self._font(12),
             fg="#000000",
             bg="#ffffff",
             anchor="w",
@@ -1530,7 +1583,7 @@ class SequenceArchiverApp:
         header = tk.Frame(parent, bg="#ffffff")
         header.pack(fill="x", padx=20, pady=(16, 12))
         tk.Label(header, text=title, font=self._font(17, "bold"), fg="#1f2540", bg="#ffffff", anchor="w").pack(fill="x", pady=(0, 4))
-        tk.Label(header, text=subtitle, font=self._font(10), fg="#6b7692", bg="#ffffff", anchor="w").pack(fill="x")
+        tk.Label(header, text=subtitle, font=self._font(12), fg="#1f2540", bg="#ffffff", anchor="w").pack(fill="x")
         return header
 
     def build_destination_drive_path(self):
@@ -1857,10 +1910,10 @@ class SequenceArchiverApp:
             center_x = width // 2
             cloud_icon = self.ui_icon_photos.get("workspace_cloud_save")
             if cloud_icon is not None:
-                drop_area.create_image(center_x, 50, image=cloud_icon, anchor="center", tags="drop_outline")
+                drop_area.create_image(center_x, 75, image=cloud_icon, anchor="center", tags="drop_outline")
             else:
-                drop_area.create_text(center_x, 50, text="\U0001F4E4", fill="#5c667f", font=("Segoe UI Emoji", 28))
-            drop_area.create_text(center_x, 100, text="박스를 클릭하여 파일을 선택하세요", fill="#2f3749", font=self._font(12, "bold"))
+                drop_area.create_text(center_x, 75, text="\U0001F4E4", fill="#5c667f", font=("Segoe UI Emoji", 28))
+            drop_area.create_text(center_x, 125, text="박스를 클릭하여 파일을 선택하세요", fill="#2f3749", font=self._font(12, "bold"))
             drop_area.coords("select_btn", center_x, 132)
 
         select_btn.configure(command=pick_files)
