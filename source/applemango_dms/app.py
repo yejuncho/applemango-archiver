@@ -1,6 +1,5 @@
 import os
 import re
-import shutil
 import threading
 import random
 import tkinter as tk
@@ -110,11 +109,13 @@ from applemango_dms.utils.images import (
 class SequenceArchiverApp:
     def __init__(self):
         self.root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
+        self._force_fullscreen = True
         apply_window_icon(self.root)
         self.ui_font_family = self._initialize_ui_font_family()
         self.root.geometry("640x500")
         self.root.configure(bg="white")
         self.root.resizable(True, True)
+        self._apply_fullscreen_mode()
 
         self.db = ArchiveDatabase(config.archive_db_path)
         self.filename_builder = FilenameBuilder()
@@ -245,7 +246,19 @@ class SequenceArchiverApp:
         }
 
     def _resize(self, w, h):
+        if self._force_fullscreen:
+            self._apply_fullscreen_mode()
+            return
         self.root.geometry(f"{w}x{h}")
+
+    def _apply_fullscreen_mode(self):
+        try:
+            self.root.attributes("-fullscreen", True)
+        except Exception:
+            try:
+                self.root.state("zoomed")
+            except Exception:
+                pass
 
     def clear_screen(self):
         for child in self.root.winfo_children():
@@ -421,6 +434,7 @@ class SequenceArchiverApp:
             "workspace_file_save": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_save_blue.svg", 18, 18, None),
             "workspace_file_search": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_search_green.svg", 18, 18, None),
             "workspace_exit": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "exit_red.svg", 18, 18, None),
+            "workspace_storage": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "storage.svg", 18, 18, None),
             "workspace_cloud_save": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "cloud_save_blue.svg", 80, 80, None),
         }
 
@@ -518,6 +532,9 @@ class SequenceArchiverApp:
         self.login_connectivity["running"] = False
 
     def _center_window(self, width, height):
+        if self._force_fullscreen:
+            self._apply_fullscreen_mode()
+            return
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
@@ -636,6 +653,7 @@ class SequenceArchiverApp:
         target_w = 420
         target_h = 560
         self._center_window(target_w, target_h)
+        self._apply_fullscreen_mode()
         self.root.title("애플망고 DMS - 로그인")
         self.clear_screen()
         self.root.configure(bg="#f8f8ff")
@@ -644,7 +662,7 @@ class SequenceArchiverApp:
         bg.pack(fill="both", expand=True)
         self.login_bg_canvas = bg
 
-        card_info = self.create_login_card(bg)
+        card_info = self.create_login_card(bg, height=494)
         content = card_info["content"]
         card_redraw = card_info["redraw"]
 
@@ -922,7 +940,7 @@ class SequenceArchiverApp:
         tk.Label(header, text=f"연결 상태: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
 
     def _create_workspace_shell(self):
-        self._resize(1160, 780)
+        self._resize(1372, 900)
         self.root.title("애플망고 DMS - 워크스페이스")
         self.clear_screen()
         self.root.configure(bg="#edf2fb")
@@ -932,8 +950,8 @@ class SequenceArchiverApp:
 
         main_card = self.create_login_card(
             bg,
-            width=1060,
-            height=694,
+            width=1272,
+            height=798,
             fill_top="#ffffff",
             fill_bottom="#f4f7ff",
             radius=20,
@@ -1024,9 +1042,33 @@ class SequenceArchiverApp:
         body = tk.Frame(shell, bg="#ffffff")
         body.pack(fill="both", expand=True)
 
-        sidebar = tk.Frame(body, bg="#edf2fb", width=250, highlightthickness=0, bd=0)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
+        sidebar_shell = tk.Canvas(body, bg="#ffffff", width=225, highlightthickness=0, bd=0)
+        sidebar_shell.pack(side="left", fill="y", padx=(12, 0), pady=(10, 12))
+
+        sidebar = tk.Frame(sidebar_shell, bg="#edf2fb")
+        sidebar_window_id = sidebar_shell.create_window(0, 0, window=sidebar, anchor="nw")
+
+        def redraw_sidebar(_event=None):
+            sidebar_shell.delete("sidepanel")
+            width = max(170, sidebar_shell.winfo_width())
+            height = max(220, sidebar_shell.winfo_height())
+            self._smooth_rounded_rect(
+                sidebar_shell,
+                1,
+                1,
+                width - 1,
+                height - 1,
+                24,
+                fill="#edf2fb",
+                outline="#d9deea",
+                width=1,
+                tags="sidepanel",
+            )
+            sidebar_shell.coords(sidebar_window_id, 6, 6)
+            sidebar_shell.itemconfigure(sidebar_window_id, width=max(10, width - 12), height=max(10, height - 12))
+            sidebar_shell.tag_lower("sidepanel")
+
+        sidebar_shell.bind("<Configure>", redraw_sidebar)
 
         content_area = tk.Frame(body, bg="#ffffff", highlightthickness=0, bd=0)
         content_area.pack(side="left", fill="both", expand=True)
@@ -1040,105 +1082,6 @@ class SequenceArchiverApp:
             "header": header,
             "body": body,
         }
-
-    def _build_sidebar_nav(self, parent, active_key, items, icon_photos=None):
-        rows = []
-        top_gap = 10
-        row_gap = 10
-        nav_section = tk.Frame(parent, bg=parent.cget("bg"))
-        nav_section.pack(fill="both", expand=True, pady=(top_gap, 0))
-
-        def build_row(key, icon, title, desc, command, icon_fg, active_bg, is_last):
-            is_active = key == active_key
-            base_bg = parent.cget("bg")
-            hover_bg = "#f2f5fb"
-            card_bg = active_bg if is_active else "#fdfefe"
-
-            outer = tk.Frame(nav_section, bg=base_bg)
-            outer.pack(fill="x", padx=10, pady=(0, 0 if is_last else row_gap))
-
-            card = tk.Canvas(
-                outer,
-                bg=base_bg,
-                highlightthickness=0,
-                bd=0,
-                relief="flat",
-                cursor="hand2",
-                height=96,
-            )
-            card.pack(fill="x")
-
-            def activate(_event=None):
-                command()
-
-            def apply_style(mode="normal"):
-                nonlocal is_active
-                if mode == "active":
-                    bg_color = active_bg
-                    border = "#d0d7e6"
-                    icon_color = icon_fg
-                    title_color = "#2b3348"
-                    desc_color = "#596279"
-                elif mode == "hover":
-                    bg_color = hover_bg
-                    border = "#d5dbe9"
-                    icon_color = icon_fg
-                    title_color = "#2b3348"
-                    desc_color = "#596279"
-                else:
-                    bg_color = card_bg
-                    border = "#d9deea"
-                    icon_color = icon_fg
-                    title_color = "#2d3448"
-                    desc_color = "#677189"
-
-                card.delete("nav")
-                width = max(180, card.winfo_width())
-                self._smooth_rounded_rect(card, 1, 1, width - 1, 95, 20, fill=bg_color, outline=border, width=1, tags="nav")
-                icon_photo = (icon_photos or {}).get(key)
-                if icon_photo is not None:
-                    card.create_image(26, 31, image=icon_photo, anchor="center", tags="nav")
-                else:
-                    card.create_text(26, 31, text=icon, font=("Segoe UI Emoji", 18), fill=icon_color, anchor="center", tags="nav")
-                card.create_text(52, 25, text=title, font=self._font(11, "bold"), fill=title_color, anchor="w", tags="nav")
-                card.create_text(
-                    52,
-                    59,
-                    text=desc,
-                    font=self._font(8),
-                    fill=desc_color,
-                    anchor="w",
-                    justify="left",
-                    width=max(110, width - 72),
-                    tags="nav",
-                )
-
-            card.bind("<Configure>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
-            card.bind("<Button-1>", activate, add="+")
-            outer.bind("<Button-1>", activate, add="+")
-            card.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
-            card.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
-            outer.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
-            outer.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
-
-            rows.append(card)
-            apply_style("active" if is_active else "normal")
-            return card
-
-        total = len(items)
-        for idx, (key, icon, title, desc, command, icon_fg) in enumerate(items):
-            build_row(
-                key,
-                icon,
-                title,
-                desc,
-                command,
-                icon_fg,
-                active_bg="#f7f9fd",
-                is_last=(idx == total - 1),
-            )
-
-        return rows
 
     @staticmethod
     def _format_iso_date_input(raw_text):

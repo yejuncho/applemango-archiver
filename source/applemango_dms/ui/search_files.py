@@ -3,6 +3,7 @@ import re
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
+from applemango_dms.ui.workplace_menu import build_sidebar_nav
 
 import applemango_dms.state as state
 
@@ -11,7 +12,8 @@ def show_search_files_screen(app):
     shell = app._create_workspace_shell()
     app.root.title("애플망고 DMS - 파일 검색")
 
-    app._build_sidebar_nav(
+    build_sidebar_nav(
+        app,
         shell["sidebar"],
         "search",
         [
