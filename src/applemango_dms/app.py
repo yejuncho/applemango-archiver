@@ -869,7 +869,7 @@ class SequenceArchiverApp:
 
     @staticmethod
     def _get_demo_workspace_base_path():
-        return Path(os.path.expanduser("~/Documents/Applemango_Demo_Workspace"))
+        return config.PROJECT_ROOT / "demo_workspace"
 
     def _ensure_demo_workspace_root(self):
         root = self._get_demo_workspace_base_path()
@@ -1144,11 +1144,7 @@ class SequenceArchiverApp:
 
     def get_workspace_root_path(self):
         if state.is_demo_mode:
-            return Path(
-                os.path.expanduser(
-                    "~/Documents/Applemango_Demo_Workspace"
-                )
-            ) / state.active_workspace
+            return self._get_demo_workspace_base_path() / state.active_workspace
         return self.build_destination_drive_path()
 
     def show_save_files_screen(self):

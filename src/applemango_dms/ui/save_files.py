@@ -137,7 +137,7 @@ def show_save_files_screen(app):
     cloud_icon = app.ui_icon_photos.get("workspace_cloud_save")
     if cloud_icon is not None:
         drop_area.create_image(center_x, center_y, image=cloud_icon, anchor="center", tags="drop_icon")
-        drop_area.scale("drop_icon", center_x, center_y, 0.75, 0.75)
+        drop_area.scale("drop_icon", center_x, center_y, 0.5, 0.5)
     else:
         drop_area.create_text(center_x, center_y, text="\U0001F4E4", fill="#5c667f", font=("Segoe UI Emoji", 24))
 
