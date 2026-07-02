@@ -1,10 +1,17 @@
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import ttk
 from pathlib import Path
 from datetime import datetime
 import re
+import time
+import math
+import shutil
+import threading
 from tkinter import filedialog
 import applemango_dms.config as config
+import applemango_dms.state as state
+from applemango_dms.services.nas import get_mapped_network_drives, normalize_drive_letter
 from applemango_dms.ui.workplace_menu import build_sidebar_nav
 from applemango_dms.utils.images import load_logo_photo, load_svg_photo
 
@@ -46,8 +53,15 @@ def show_save_files_screen(app):
 
     selected_files = []
     selected_row_keys = set()
+    row_metadata_state = {}
     pending_count_var = tk.StringVar(value="업로드 대기 파일 (0)")
     refresh_row3_rows = lambda: None
+    try:
+        document_type_options = app.db.get_document_types()
+    except Exception:
+        document_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
+    if not document_type_options:
+        document_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
 
     split = tk.Frame(board, bg="#ffffff")
     split.pack(fill="both", expand=True, padx=10, pady=0)
@@ -62,7 +76,7 @@ def show_save_files_screen(app):
     right_col = tk.Frame(split, bg="#ffffff")
     right_col.grid(row=0, column=1, sticky="nsw", padx=(10, 0))
 
-    drop_area = tk.Canvas(left_col, height=102, bg="#ffffff", highlightthickness=0, bd=0, cursor="hand2")
+    drop_area = tk.Canvas(left_col, height=102, bg="#ffffff", highlightthickness=0, bd=0)
     drop_area.pack(fill="x")
     left_detail_card = tk.Canvas(left_col, height=500, bg="#ffffff", highlightthickness=0, bd=0)
     left_detail_card.pack(fill="x", pady=10)
@@ -101,10 +115,59 @@ def show_save_files_screen(app):
         if files:
             add_file_paths(files)
 
+    def pick_folder():
+        folder = filedialog.askdirectory(parent=app.root, title="폴더 추가")
+        if folder:
+            add_folder_paths([folder])
+
+    def is_upload_destination_safe(destination):
+        if state.is_demo_mode:
+            return True
+
+        workspace_name = (state.active_workspace or "").strip().lower()
+        drive_letter = normalize_drive_letter(state.active_workspace_drive)
+        if not workspace_name or not drive_letter:
+            return False
+
+        mapped = get_mapped_network_drives()
+        if not mapped:
+            return False
+
+        remote_unc = ""
+        for mapped_drive, remote in mapped:
+            if normalize_drive_letter(mapped_drive) == drive_letter:
+                remote_unc = str(remote or "").rstrip("\\")
+                break
+
+        if not remote_unc:
+            return False
+
+        # UNC: \\server\share
+        parts = [part for part in remote_unc.split("\\") if part]
+        if len(parts) < 2:
+            return False
+
+        remote_server = parts[0].lower()
+        remote_share = parts[1].lower()
+        expected_server = (config.default_server_name or "").strip("\\").lower()
+
+        if expected_server and remote_server != expected_server:
+            return False
+        if remote_share != workspace_name:
+            return False
+
+        destination_drive = normalize_drive_letter(getattr(destination, "drive", ""))
+        if destination_drive and destination_drive != drive_letter:
+            return False
+
+        return True
+
     def remove_selected_placeholder():
         if not selected_row_keys:
             return
         selected_files[:] = [path for path in selected_files if path not in selected_row_keys]
+        for removed_key in list(selected_row_keys):
+            row_metadata_state.pop(removed_key, None)
         selected_row_keys.clear()
         pending_count_var.set(f"업로드 대기 파일 ({len(selected_files)})")
         refresh_row3_rows()
@@ -112,11 +175,111 @@ def show_save_files_screen(app):
     def clear_all_files():
         selected_files.clear()
         selected_row_keys.clear()
+        row_metadata_state.clear()
         pending_count_var.set("업로드 대기 파일 (0)")
         refresh_row3_rows()
 
+    def remove_row_item(row_key):
+        selected_files[:] = [path for path in selected_files if path != row_key]
+        selected_row_keys.discard(row_key)
+        row_metadata_state.pop(row_key, None)
+        pending_count_var.set(f"업로드 대기 파일 ({len(selected_files)})")
+        refresh_row3_rows()
+
+    def set_row_upload_state(row_key, *, status_code=None, progress_ratio=None):
+        row_state = row_metadata_state.setdefault(row_key, {})
+        if status_code is not None:
+            row_state["status_code"] = status_code
+        if progress_ratio is not None:
+            row_state["progress_ratio"] = max(0.0, min(1.0, float(progress_ratio)))
+
+    def get_upload_targets():
+        if selected_row_keys:
+            return [path for path in selected_files if path in selected_row_keys]
+        return list(selected_files)
+
     def start_upload_placeholder():
-        # Placeholder until upload flow is finalized.
+        targets = get_upload_targets()
+        if not targets:
+            return None
+
+        destination = app.get_workspace_root_path()
+        if destination is None:
+            for row_key in targets:
+                set_row_upload_state(row_key, status_code="failed", progress_ratio=0.0)
+            refresh_row3_rows()
+            return None
+
+        if not is_upload_destination_safe(destination):
+            for row_key in targets:
+                set_row_upload_state(row_key, status_code="failed", progress_ratio=0.0)
+            refresh_row3_rows()
+            return None
+
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            for row_key in targets:
+                set_row_upload_state(row_key, status_code="failed", progress_ratio=0.0)
+            refresh_row3_rows()
+            return None
+
+        for row_key in targets:
+            set_row_upload_state(row_key, status_code="uploading", progress_ratio=0.0)
+        refresh_row3_rows()
+
+        def upload_worker(target_rows):
+            reserved_names = set()
+            for row_key in target_rows:
+                source = Path(row_key)
+                row_state = row_metadata_state.setdefault(row_key, {})
+                archive_date = row_state.get("date_iso") or datetime.now().strftime("%Y-%m-%d")
+                doc_type = row_state.get("document_type") or "기타"
+                tags = row_state.get("tags", "")
+
+                try:
+                    if not source.exists() or not source.is_file():
+                        raise FileNotFoundError(f"source missing: {source}")
+
+                    candidate_name = source.name
+                    archived_name = app.filename_builder.ensure_unique_name(destination, candidate_name, reserved_names=reserved_names)
+                    destination_path = destination / archived_name
+
+                    total_size = max(1, source.stat().st_size)
+                    copied_size = 0
+
+                    with source.open("rb") as src_f, destination_path.open("wb") as dst_f:
+                        while True:
+                            chunk = src_f.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            dst_f.write(chunk)
+                            copied_size += len(chunk)
+                            ratio = copied_size / float(total_size)
+                            app.root.after(0, lambda key=row_key, r=ratio: (set_row_upload_state(key, status_code="uploading", progress_ratio=r), refresh_row3_rows()))
+
+                    shutil.copystat(source, destination_path)
+
+                    app.db.insert_file_record({
+                        "workspace": state.active_workspace or "",
+                        "original_filename": source.name,
+                        "archived_filename": archived_name,
+                        "full_path": str(destination_path),
+                        "document_type": doc_type,
+                        "tags": tags,
+                        "uploaded_by": state.session_account_name or state.session_username or "",
+                        "archive_date": archive_date,
+                        "archived_at": datetime.now().isoformat(timespec="seconds"),
+                        "file_ext": source.suffix,
+                        "file_size": destination_path.stat().st_size if destination_path.exists() else 0,
+                        "source_path": str(source),
+                    })
+
+                    app.root.after(0, lambda key=row_key: (set_row_upload_state(key, status_code="success", progress_ratio=1.0), refresh_row3_rows()))
+                except Exception:
+                    app.root.after(0, lambda key=row_key: (set_row_upload_state(key, status_code="failed", progress_ratio=0.0), refresh_row3_rows()))
+
+        threading.Thread(target=upload_worker, args=(targets,), daemon=True).start()
         return None
 
     def create_rounded_action(parent, text, command, *, width, height, fill, outline, text_color, icon_photo=None, icon_fallback_text=None):
@@ -216,9 +379,48 @@ def show_save_files_screen(app):
     cloud_icon = app.ui_icon_photos.get("workspace_cloud_save")
     if cloud_icon is not None:
         drop_area.create_image(center_x, center_y, image=cloud_icon, anchor="center", tags="drop_icon")
-        drop_area.scale("drop_icon", center_x, center_y, 0.5, 0.5)
+        drop_area.scale("drop_icon", center_x, center_y, 0.3, 0.3)
     else:
         drop_area.create_text(center_x, center_y, text="\U0001F4E4", fill="#5c667f", font=("Segoe UI Emoji", 24))
+
+    plus_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "plus.svg",
+        max_width=12,
+        max_height=12,
+        tint="#ffffff",
+    )
+
+    drop_button_row = tk.Frame(drop_area, bg="#f8faff")
+    add_file_btn = create_rounded_action(
+        drop_button_row,
+        "파일 추가",
+        pick_files,
+        width=108,
+        height=28,
+        fill="#5555d5",
+        outline="#5555d5",
+        text_color="#ffffff",
+        icon_photo=plus_icon,
+        icon_fallback_text="+",
+    )
+    add_file_btn.pack(side="left")
+
+    add_folder_btn = create_rounded_action(
+        drop_button_row,
+        "폴더 추가",
+        pick_folder,
+        width=108,
+        height=28,
+        fill="#5555d5",
+        outline="#5555d5",
+        text_color="#ffffff",
+        icon_photo=plus_icon,
+        icon_fallback_text="+",
+    )
+    add_folder_btn.pack(side="left", padx=(8, 0))
+
+    drop_area.plus_icon_ref = plus_icon
+    drop_area.create_window(center_x, drop_height - 26, window=drop_button_row, anchor="center")
 
     left_detail_card.delete("all")
     detail_width = drop_width
@@ -346,7 +548,7 @@ def show_save_files_screen(app):
     upload_btn.pack(side="right")
 
     # Row-2 / Row-3 shared column widths (percent). Col-3 removed; col-2 absorbs its width.
-    table_col_widths_pct = [2.5, 40, 10, 10, 10, 7.5, 7.5, 10, 2.5]
+    table_col_widths_pct = [2.5, 32.5, 12.5, 12.5, 12.5, 7.5, 7.5, 10, 2.5]
     row2_headers = [
         "",
         "원본 파일명",
@@ -396,9 +598,15 @@ def show_save_files_screen(app):
         max_width=14,
         max_height=14,
     )
+    cancel_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "cancel.svg",
+        max_width=12,
+        max_height=12,
+    )
     left_detail_card.unchecked_icon_ref = unchecked_icon
     left_detail_card.checked_icon_ref = checked_icon
     left_detail_card.checked_white_icon_ref = checked_white_icon
+    left_detail_card.cancel_icon_ref = cancel_icon
 
     file_icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "file_formats"
     file_format_icons = {
@@ -528,19 +736,39 @@ def show_save_files_screen(app):
         local_cursor += width_px
 
     table_row_height = 34
-    invalid_windows_chars = re.compile(r'[<>:"/\\|?*]')
     font_measure_cache = {}
+    current_year = time.localtime().tm_year
+    row_combo_style_name = "SaveFilesRow.TCombobox"
+    combo_style = ttk.Style(app.root)
+    combo_style.configure(
+        row_combo_style_name,
+        fieldbackground="#ffffff",
+        background="#ffffff",
+        foreground="#1f2b4a",
+        arrowsize=12,
+    )
 
     def format_size_bytes(size_bytes):
-        units = ["B", "KB", "MB", "GB", "TB"]
-        value = float(size_bytes)
-        unit_idx = 0
-        while value >= 1024.0 and unit_idx < len(units) - 1:
-            value /= 1024.0
-            unit_idx += 1
-        if unit_idx == 0:
-            return f"{int(value)} {units[unit_idx]}"
-        return f"{value:.1f} {units[unit_idx]}"
+        bytes_value = max(0, int(size_bytes or 0))
+        kb = 1024.0
+        mb = kb * 1024.0
+        gb = mb * 1024.0
+        tb = gb * 1024.0
+
+        def ceil_one_decimal(value):
+            return math.ceil(value * 10.0) / 10.0
+
+        if bytes_value == 0:
+            return "0 MB"
+        if bytes_value < gb:
+            mb_value = bytes_value / mb
+            mb_value = max(0.1, ceil_one_decimal(mb_value))
+            return f"{mb_value:.1f} MB"
+        if bytes_value < tb:
+            gb_value = ceil_one_decimal(bytes_value / gb)
+            return f"{gb_value:.1f} GB"
+        tb_value = ceil_one_decimal(bytes_value / tb)
+        return f"{tb_value:.1f} TB"
 
     def truncate_to_pixel_width(text, max_width_px, font_spec):
         value = str(text or "")
@@ -571,6 +799,107 @@ def show_save_files_screen(app):
                 hi = mid - 1
 
         return value[:lo].rstrip() + ellipsis
+
+    def is_leap_year(year_value):
+        return year_value % 4 == 0 and (year_value % 100 != 0 or year_value % 400 == 0)
+
+    def max_day_for_month(year_value, month_value):
+        if month_value in (1, 3, 5, 7, 8, 10, 12):
+            return 31
+        if month_value in (4, 6, 9, 11):
+            return 30
+        if month_value == 2:
+            return 29 if is_leap_year(year_value) else 28
+        return 31
+
+    def split_month_day_digits(rest_digits):
+        if not rest_digits:
+            return "", ""
+        if len(rest_digits) == 1:
+            return rest_digits, ""
+
+        month_two = rest_digits[:2]
+        try:
+            month_two_int = int(month_two)
+        except ValueError:
+            month_two_int = 0
+
+        if 1 <= month_two_int <= 12:
+            return month_two, rest_digits[2:4]
+
+        month_one = rest_digits[0]
+        carry_to_day = rest_digits[1:4]
+        return month_one, carry_to_day
+
+    def normalize_date_input(raw_value):
+        digits = ''.join(ch for ch in str(raw_value or "") if ch.isdigit())[:8]
+        if not digits:
+            return "", ""
+
+        if len(digits) < 4:
+            return digits, digits
+
+        year_digits = digits[:4]
+        year_int = max(1, min(current_year, int(year_digits)))
+        year_digits = f"{year_int:04d}"
+
+        rest = digits[4:]
+        if not rest:
+            return year_digits, year_digits
+
+        month_display = ""
+        month_digits_for_state = ""
+        day_digits_raw = ""
+
+        if len(rest) == 1:
+            # Keep single-digit month as-is while user is still typing.
+            month_display = rest
+            month_digits_for_state = rest
+        else:
+            month_two = rest[:2]
+            month_two_int = int(month_two)
+
+            if 1 <= month_two_int <= 12:
+                month_display = f"{month_two_int:02d}"
+                month_digits_for_state = month_display
+                day_digits_raw = rest[2:4]
+            else:
+                # Carry the second digit to day when month two-digit value is invalid (e.g. 13 -> 01 + 3).
+                month_one = rest[0]
+                carry_to_day = rest[1:4]
+                if month_one == "0":
+                    month_display = "0"
+                    month_digits_for_state = "0"
+                else:
+                    month_one_int = max(1, min(9, int(month_one)))
+                    month_display = f"{month_one_int:02d}"
+                    month_digits_for_state = month_display
+                day_digits_raw = carry_to_day
+
+        if not month_display:
+            return year_digits, year_digits
+
+        if not day_digits_raw:
+            normalized_digits = year_digits + month_digits_for_state
+            return normalized_digits, f"{year_digits}-{month_display}"
+
+        if len(day_digits_raw) == 1:
+            day_first = int(day_digits_raw)
+            if 4 <= day_first <= 9:
+                day_digits = f"0{day_first}"
+                normalized_digits = year_digits + month_digits_for_state + day_digits
+                return normalized_digits, f"{year_digits}-{month_display}-{day_digits}"
+            normalized_digits = year_digits + month_digits_for_state + day_digits_raw
+            return normalized_digits, f"{year_digits}-{month_display}-{day_digits_raw}"
+
+        month_for_day = int(month_digits_for_state if len(month_digits_for_state) == 2 else month_display)
+        day_int = int(day_digits_raw[:2])
+        max_day = max_day_for_month(year_int, month_for_day)
+        day_int = max(1, min(max_day, day_int))
+        day_digits = f"{day_int:02d}"
+
+        normalized_digits = year_digits + month_digits_for_state + day_digits
+        return normalized_digits, f"{year_digits}-{month_display}-{day_digits}"
 
     def pick_file_format_icon_key(path_obj):
         ext = path_obj.suffix.lower().lstrip(".")
@@ -608,38 +937,64 @@ def show_save_files_screen(app):
 
     def metadata_row_from_path(path_text):
         path_obj = Path(path_text)
+        row_key = str(path_obj)
         try:
             stats = path_obj.stat()
-            modified = datetime.fromtimestamp(stats.st_mtime).strftime("%Y-%m-%d")
+            modified = datetime.fromtimestamp(stats.st_mtime).strftime("%Y%m%d")
             size_text = format_size_bytes(stats.st_size)
         except OSError:
-            modified = "-"
+            modified = ""
             size_text = "-"
+
+        row_state = row_metadata_state.setdefault(row_key, {})
+        if "date_digits" not in row_state:
+            row_state["date_digits"] = modified
+        if "document_type" not in row_state:
+            row_state["document_type"] = document_type_options[0] if document_type_options else "기타"
+        if "tags" not in row_state:
+            row_state["tags"] = ""
+        if "status_code" not in row_state:
+            row_state["status_code"] = "standby"
+        if "progress_ratio" not in row_state:
+            row_state["progress_ratio"] = 0.0
+        row_state["date_digits"], date_text = normalize_date_input(row_state.get("date_digits", ""))
+        row_state["date_iso"] = date_text if len(date_text) == 10 else ""
 
         suffix = path_obj.suffix
         ext_text = suffix[1:].upper() if suffix.startswith(".") else (suffix.upper() if suffix else "-")
-        doc_type = "기타"
-        tags = ""
 
         return {
-            "row_key": str(path_obj),
-            "checked": str(path_obj) in selected_row_keys,
+            "row_key": row_key,
+            "checked": row_key in selected_row_keys,
             "original_name": path_obj.name,
-            "date": modified,
-            "document_type": doc_type,
-            "tags": tags,
+            "date": date_text,
+            "document_type": row_state.get("document_type", "기타"),
+            "tags": row_state.get("tags", ""),
             "size": size_text,
-            "status": "대기",
-            "progress": "0%",
+            "status_code": row_state.get("status_code", "standby"),
+            "progress_ratio": float(row_state.get("progress_ratio", 0.0) or 0.0),
             "icon_key": pick_file_format_icon_key(path_obj),
             "file_ext": ext_text,
         }
 
     def get_row_data():
         selected_row_keys.intersection_update(selected_files)
+        active_keys = set(selected_files)
+        for stale_key in list(row_metadata_state.keys()):
+            if stale_key not in active_keys:
+                row_metadata_state.pop(stale_key, None)
         if not selected_files:
             return []
         return [metadata_row_from_path(file_path) for file_path in selected_files]
+
+    def get_status_display(status_code):
+        status_map = {
+            "failed": ("실패", "#d33e3e"),
+            "success": ("완료", "#2e9b53"),
+            "standby": ("대기 중", "#000000"),
+            "uploading": ("업로드 중", "#2d6cdf"),
+        }
+        return status_map.get(status_code, status_map["standby"])
 
     def is_ctrl_pressed(event):
         return bool(getattr(event, "state", 0) & 0x0004)
@@ -814,7 +1169,42 @@ def show_save_files_screen(app):
             row_canvas.create_line(0, table_row_height - 1, row2_inner_width, table_row_height - 1, fill=row_separator_color, width=1)
 
             row_key = row_values["row_key"]
-            row_canvas.bind("<Button-1>", lambda event, key=row_key: select_row_item(key, event), add="+")
+            date_col_left = col_starts[2] - row2_inner_x1
+            date_col_width = col_width_px[2]
+            doc_col_left = col_starts[3] - row2_inner_x1
+            doc_col_width = col_width_px[3]
+            tags_col_left = col_starts[4] - row2_inner_x1
+            tags_col_width = col_width_px[4]
+            cancel_col_left = col_starts[8] - row2_inner_x1
+            cancel_col_width = col_width_px[8]
+
+            def on_row_canvas_click(
+                event,
+                key=row_key,
+                date_left=date_col_left,
+                date_width=date_col_width,
+                doc_left=doc_col_left,
+                doc_width=doc_col_width,
+                tags_left=tags_col_left,
+                tags_width=tags_col_width,
+                cancel_left=cancel_col_left,
+                cancel_width=cancel_col_width,
+            ):
+                date_right = date_left + date_width
+                doc_right = doc_left + doc_width
+                tags_right = tags_left + tags_width
+                cancel_right = cancel_left + cancel_width
+                if date_left <= event.x <= date_right:
+                    return None
+                if doc_left <= event.x <= doc_right:
+                    return None
+                if tags_left <= event.x <= tags_right:
+                    return None
+                if cancel_left <= event.x <= cancel_right:
+                    return None
+                return select_row_item(key, event)
+
+            row_canvas.bind("<Button-1>", on_row_canvas_click, add="+")
 
             check_icon = (checked_white_icon or checked_icon) if row_values["checked"] else unchecked_icon
             if check_icon is not None:
@@ -865,12 +1255,170 @@ def show_save_files_screen(app):
                 anchor="w",
             )
 
-            row_canvas.create_text(local_col_centers[2], table_row_height // 2, text=row_values["date"], fill=row_primary_text_color, font=app._font(9), anchor="center")
-            row_canvas.create_text(local_col_centers[3], table_row_height // 2, text=row_values["document_type"], fill=row_primary_text_color, font=app._font(9), anchor="center")
-            row_canvas.create_text(local_col_centers[4], table_row_height // 2, text=row_values["tags"], fill=row_primary_text_color, font=app._font(9), anchor="center")
+            date_var = tk.StringVar(value=row_values["date"])
+            date_entry_width = max(52, date_col_width - 12)
+            date_entry = tk.Entry(
+                row_canvas,
+                textvariable=date_var,
+                font=app._font(9),
+                justify="center",
+                bd=0,
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground="#c8d0e6",
+                highlightcolor="#ffffff" if row_selected else "#5555d5",
+                bg=row_bg_color,
+                fg="#ffffff" if row_selected else "#1f2b4a",
+                insertbackground="#ffffff" if row_selected else "#1f2b4a",
+            )
+
+            def on_date_key_release(_event, row_key=row_key, var=date_var, entry_widget=date_entry):
+                normalized_digits, normalized_text = normalize_date_input(var.get())
+                row_metadata_state.setdefault(row_key, {})["date_digits"] = normalized_digits
+                var.set(normalized_text)
+                entry_widget.icursor(tk.END)
+
+            date_entry.bind("<KeyRelease>", on_date_key_release)
+            row_canvas.create_window(
+                date_col_left + (date_col_width / 2.0),
+                table_row_height // 2,
+                window=date_entry,
+                width=date_entry_width,
+                height=22,
+                anchor="center",
+            )
+
+            doc_type_var = tk.StringVar(value=row_values["document_type"])
+            doc_combo = ttk.Combobox(
+                row_canvas,
+                textvariable=doc_type_var,
+                values=document_type_options,
+                state="readonly",
+                style=row_combo_style_name,
+                justify="center",
+                font=app._font(8),
+            )
+            doc_combo.configure(width=max(6, int((doc_col_width - 10) / 11)))
+
+            def on_doc_combo_selected(_event, row_key=row_key, var=doc_type_var):
+                row_metadata_state.setdefault(row_key, {})["document_type"] = var.get().strip() or "기타"
+
+            doc_combo.bind("<<ComboboxSelected>>", on_doc_combo_selected)
+            row_canvas.create_window(
+                doc_col_left + (doc_col_width / 2.0),
+                table_row_height // 2,
+                window=doc_combo,
+                width=max(56, doc_col_width - 10),
+                height=22,
+                anchor="center",
+            )
+
+            tag_var = tk.StringVar(value=row_values["tags"])
+            tag_entry = tk.Entry(
+                row_canvas,
+                textvariable=tag_var,
+                font=app._font(9),
+                justify="left",
+                bd=0,
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground="#c8d0e6",
+                highlightcolor="#ffffff" if row_selected else "#5555d5",
+                bg=row_bg_color,
+                fg="#ffffff" if row_selected else "#1f2b4a",
+                insertbackground="#ffffff" if row_selected else "#1f2b4a",
+            )
+
+            def on_tag_key_release(_event, row_key=row_key, var=tag_var, entry_widget=tag_entry):
+                row_metadata_state.setdefault(row_key, {})["tags"] = var.get()
+                entry_widget.icursor(tk.END)
+
+            tag_entry.bind("<KeyRelease>", on_tag_key_release)
+            row_canvas.create_window(
+                tags_col_left + (tags_col_width / 2.0),
+                table_row_height // 2,
+                window=tag_entry,
+                width=max(56, tags_col_width - 10),
+                height=22,
+                anchor="center",
+            )
+
             row_canvas.create_text(local_col_centers[5], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(9), anchor="center")
-            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=row_values["status"], fill=row_primary_text_color, font=app._font(9), anchor="center")
-            row_canvas.create_text(local_col_centers[7], table_row_height // 2, text=row_values["progress"], fill=row_primary_text_color, font=app._font(9), anchor="center")
+
+            status_text, status_color = get_status_display(row_values.get("status_code"))
+            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=status_text, fill=status_color, font=app._font(9, "bold"), anchor="center")
+
+            progress_ratio = max(0.0, min(1.0, float(row_values.get("progress_ratio", 0.0))))
+            progress_col_left = col_starts[7] - row2_inner_x1
+            progress_col_width = col_width_px[7]
+            progress_pct_text = f"{int(round(progress_ratio * 100.0))}%"
+
+            progress_text_w = 28
+            bar_x1 = progress_col_left + 4
+            base_bar_x2 = progress_col_left + max(16, progress_col_width - progress_text_w - 4)
+            bar_extension = int((base_bar_x2 - bar_x1) * 0.2)
+            bar_x2 = min(progress_col_left + progress_col_width - progress_text_w, base_bar_x2 + bar_extension)
+            bar_y1 = (table_row_height // 2) - 4
+            bar_y2 = (table_row_height // 2) + 4
+            bar_radius = max(2, (bar_y2 - bar_y1) // 2)
+
+            app._smooth_rounded_rect(
+                row_canvas,
+                bar_x1,
+                bar_y1,
+                bar_x2,
+                bar_y2,
+                bar_radius,
+                fill="#d7deea",
+                outline="",
+                width=0,
+            )
+
+            if progress_ratio > 0:
+                fill_x2 = bar_x1 + max((bar_y2 - bar_y1), int((bar_x2 - bar_x1) * progress_ratio))
+                fill_x2 = min(bar_x2, fill_x2)
+                app._smooth_rounded_rect(
+                    row_canvas,
+                    bar_x1,
+                    bar_y1,
+                    fill_x2,
+                    bar_y2,
+                    bar_radius,
+                    fill="#5555d5",
+                    outline="",
+                    width=0,
+                )
+
+            row_canvas.create_text(
+                progress_col_left + progress_col_width - 2,
+                table_row_height // 2,
+                text=progress_pct_text,
+                fill=row_primary_text_color,
+                font=app._font(8, "bold"),
+                anchor="e",
+            )
+
+            def on_cancel_click(_event, key=row_key):
+                remove_row_item(key)
+                return "break"
+
+            if cancel_icon is not None:
+                row_canvas.create_image(local_col_centers[8], table_row_height // 2, image=cancel_icon, anchor="center", tags=("row_cancel",))
+            else:
+                row_canvas.create_text(local_col_centers[8], table_row_height // 2, text="✕", fill="#8f96ad", font=app._font(10, "bold"), anchor="center", tags=("row_cancel",))
+
+            row_canvas.create_rectangle(
+                cancel_col_left,
+                0,
+                cancel_col_left + cancel_col_width,
+                table_row_height,
+                fill="",
+                outline="",
+                tags=("row_cancel",),
+            )
+            row_canvas.tag_bind("row_cancel", "<Button-1>", on_cancel_click)
+            row_canvas.tag_bind("row_cancel", "<Enter>", lambda _event, canvas=row_canvas: canvas.configure(cursor="hand2"))
+            row_canvas.tag_bind("row_cancel", "<Leave>", lambda _event, canvas=row_canvas: canvas.configure(cursor=""))
 
         update_row2_select_icon()
 
@@ -907,7 +1455,4 @@ def show_save_files_screen(app):
         width=1,
     )
 
-    drop_area.bind("<Button-1>", lambda _event: pick_files())
-    if TkinterDnD is not None and hasattr(drop_area, "drop_target_register"):
-        drop_area.drop_target_register(DND_FILES)
-        drop_area.dnd_bind("<<Drop>>", handle_drop)
+    # File/folder addition is available only through the dedicated buttons in the drop card.
