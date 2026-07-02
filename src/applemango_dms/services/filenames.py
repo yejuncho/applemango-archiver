@@ -33,7 +33,7 @@ class FilenameBuilder:
         ext = candidate.suffix
 
         name = candidate_name
-        idx = 2
+        idx = 1
         while True:
             taken_in_reserved = name in reserved_names
             taken_on_disk = bool(destination_dir and (destination_dir / name).exists())

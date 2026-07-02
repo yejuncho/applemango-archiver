@@ -117,6 +117,14 @@ class ArchiveDatabase:
             row = conn.execute('SELECT COUNT(*) FROM files WHERE workspace = ?', (workspace,)).fetchone()
         return int(row[0] if row and row[0] is not None else 0)
 
+    def get_archived_filenames(self, workspace):
+        with self._connect() as conn:
+            rows = conn.execute(
+                'SELECT archived_filename FROM files WHERE workspace = ? AND archived_filename IS NOT NULL AND archived_filename != ""',
+                (workspace,),
+            ).fetchall()
+        return {row[0] for row in rows if row and row[0]}
+
     def delete_file_records_by_paths(self, workspace, full_paths):
         targets = [str(path) for path in full_paths if str(path).strip()]
         if not targets:
