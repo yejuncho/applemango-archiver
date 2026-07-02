@@ -4,6 +4,8 @@ from tkinter import messagebox
 import applemango_dms.config as config
 import applemango_dms.state as state
 
+from applemango_dms.utils.images import load_svg_photo
+
 from applemango_dms.services.auth import (
     load_saved_credentials,
     save_credentials,
@@ -49,41 +51,75 @@ def show_login_screen(app, prefill_username=None):
 
     remember_var = tk.BooleanVar(value=remembered is not None)
     demo_mode_var = tk.BooleanVar(value=False)
+
+    icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "login"
+    checked_icon = app.login_icon_photos.get("checked")
+    unchecked_icon = app.login_icon_photos.get("unchecked")
+    if checked_icon is None or unchecked_icon is None:
+        checked_icon = checked_icon or load_svg_photo(icon_dir / "checked.svg", max_width=16, max_height=16)
+        unchecked_icon = unchecked_icon or load_svg_photo(icon_dir / "unchecked.svg", max_width=16, max_height=16)
+
+    def create_login_checkbox(parent, text, variable, *, font_size):
+        if checked_icon is None or unchecked_icon is None:
+            tk.Checkbutton(
+                parent,
+                text=text,
+                variable=variable,
+                bg="#f9f8ff",
+                activebackground="#f9f8ff",
+                fg="#3f4563",
+                selectcolor="#f9f8ff",
+                font=app._font(font_size),
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                cursor="hand2",
+            ).pack(side="left")
+            return
+
+        wrapper = tk.Frame(parent, bg="#f9f8ff", cursor="hand2")
+        wrapper.pack(side="left")
+
+        icon_label = tk.Label(
+            wrapper,
+            image=checked_icon if variable.get() else unchecked_icon,
+            bg="#f9f8ff",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        icon_label.pack(side="left", padx=(0, 6), pady=(0, 1))
+
+        text_label = tk.Label(
+            wrapper,
+            text=text,
+            font=app._font(font_size),
+            fg="#3f4563",
+            bg="#f9f8ff",
+            cursor="hand2",
+        )
+        text_label.pack(side="left")
+
+        def sync_icon(*_args):
+            next_icon = checked_icon if variable.get() else unchecked_icon
+            icon_label.configure(image=next_icon)
+            icon_label.image = next_icon
+
+        def toggle(_event=None):
+            variable.set(not bool(variable.get()))
+
+        variable.trace_add("write", sync_icon)
+        for widget in (wrapper, icon_label, text_label):
+            widget.bind("<Button-1>", toggle)
+
+        sync_icon()
     remember_row = tk.Frame(frame, bg="#f9f8ff")
     remember_row.pack(fill="x", pady=(12, 2))
-
-    tk.Checkbutton(
-        remember_row,
-        text="로그인 정보 저장",
-        variable=remember_var,
-        bg="#f9f8ff",
-        activebackground="#f9f8ff",
-        fg="#3f4563",
-        selectcolor="#f9f8ff",
-        font=app._font(10),
-        relief="flat",
-        bd=0,
-        highlightthickness=0,
-        cursor="hand2",
-    ).pack(side="left")
+    create_login_checkbox(remember_row, "로그인 정보 저장", remember_var, font_size=10)
 
     demo_mode_row = tk.Frame(frame, bg="#f9f8ff")
     demo_mode_row.pack(fill="x", pady=(0, 16))
-
-    tk.Checkbutton(
-        demo_mode_row,
-        text="로컬 데모 모드 (NAS 없이 실행)",
-        variable=demo_mode_var,
-        bg="#f9f8ff",
-        activebackground="#f9f8ff",
-        fg="#3f4563",
-        selectcolor="#f9f8ff",
-        font=app._font(9),
-        relief="flat",
-        bd=0,
-        highlightthickness=0,
-        cursor="hand2",
-    ).pack(side="left")
+    create_login_checkbox(demo_mode_row, "로컬 데모 모드 (NAS 없이 실행)", demo_mode_var, font_size=9)
 
     def submit_login():
         username = username_field["get_value"]()

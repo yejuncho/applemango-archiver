@@ -412,6 +412,8 @@ class SequenceArchiverApp:
             "password": "password.svg",
             "password_visible": "password_visible.svg",
             "password_invisible": "password_invisible.svg",
+            "checked": "checked.svg",
+            "unchecked": "unchecked.svg",
         }
 
         photos = {}
