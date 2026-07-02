@@ -255,7 +255,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
                 fill_x2,
                 bar_y2,
                 bar_radius,
-                fill="#2d6cdf",
+                fill="#5555d5",
                 outline="",
                 width=0,
                 tags="usage",
@@ -264,12 +264,11 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
         metrics_y = 82
         used_text = usage_data["used_text"]
         used_item = storage_card.create_text(
-            12,
+            33,
             metrics_y,
             text=used_text,
             font=app._font(9, "bold"),
-            fill="#2d6cdf",
-            anchor="w",
+            fill="#5555d5",
             tags="usage",
         )
         bbox = storage_card.bbox(used_item) or (12, metrics_y, 12, metrics_y)
