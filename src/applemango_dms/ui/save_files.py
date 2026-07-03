@@ -1601,9 +1601,38 @@ def show_save_files_screen(app):
         right_bottom_width - 1,
         right_bottom_height - 1,
         24,
-        fill="#ffffff",
+        fill="#edf2fb",
         outline="#d9deea",
         width=1,
     )
 
-    # File/folder addition is available only through the dedicated buttons in the drop card.
+    guide_lines = [
+        "파일명 규칙 안내",
+        "YYYY-MM-DD_문서유형_태그_원본파일명",
+        "예시:",
+        "2026-07-01_정관_수정본_히즈컴정관.pdf",
+        "특수문자는 자동으로 제거되며,",
+        "중복 시 파일명 뒤에 번호가 추가됩니다.",
+    ]
+    guide_left = 12
+    guide_top = 12
+    guide_line_height = 18
+    title_gap = 12
+    line_gap = 8
+
+    for idx, text_value in enumerate(guide_lines):
+        y = guide_top + (idx * guide_line_height)
+        if idx >= 1:
+            y += title_gap
+        if idx >= 2:
+            y += line_gap
+        if idx >= 4:
+            y += line_gap
+        right_bottom_card.create_text(
+            guide_left,
+            y,
+            text=text_value,
+            fill="#1f2b4a",
+            font=app._font(12, "bold") if idx == 0 else app._font(10, "bold") if idx == 1 else app._font(10, "italic") if idx == 3 else app._font(10),
+            anchor="nw",
+        )
