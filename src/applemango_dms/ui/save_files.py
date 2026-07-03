@@ -74,7 +74,20 @@ def show_save_files_screen(app):
     left_col = tk.Frame(split, bg="#ffffff")
     left_col.grid(row=0, column=0, sticky="nsew")
     right_col = tk.Frame(split, bg="#ffffff")
-    right_col.grid(row=0, column=1, sticky="nsw", padx=(10, 0))
+    right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+    right_col.grid_columnconfigure(0, weight=1)
+    right_top_weight = 7
+    right_bottom_weight = 3
+    right_col.grid_rowconfigure(0, weight=right_top_weight)
+    right_col.grid_rowconfigure(1, weight=right_bottom_weight)
+
+    right_top_slot = tk.Frame(right_col, bg="#ffffff")
+    right_top_slot.grid(row=0, column=0, sticky="nsew")
+    right_top_slot.pack_propagate(False)
+
+    right_bottom_slot = tk.Frame(right_col, bg="#ffffff")
+    right_bottom_slot.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+    right_bottom_slot.pack_propagate(False)
 
     drop_area = tk.Canvas(left_col, height=102, bg="#ffffff", highlightthickness=0, bd=0)
     drop_area.pack(fill="x")
@@ -82,8 +95,10 @@ def show_save_files_screen(app):
     left_detail_card.pack(fill="x", pady=10)
     tk.Frame(left_col, bg="#ffffff").pack(fill="both", expand=True)
 
-    right_card = tk.Canvas(right_col, bg="#ffffff", highlightthickness=0, bd=0)
+    right_card = tk.Canvas(right_top_slot, bg="#ffffff", highlightthickness=0, bd=0)
     right_card.pack(fill="both", expand=True)
+    right_bottom_card = tk.Canvas(right_bottom_slot, bg="#ffffff", highlightthickness=0, bd=0)
+    right_bottom_card.pack(fill="both", expand=True)
 
     def add_file_paths(paths):
         normalized = []
@@ -1558,15 +1573,33 @@ def show_save_files_screen(app):
     refresh_row3_rows = render_row3_rows
     refresh_row3_rows()
 
+    right_col.update_idletasks()
+
     right_card.delete("all")
     right_width = min(245, right_card.winfo_width())
-    right_height = min(625, right_card.winfo_height())-10
+    right_height = min(400, right_card.winfo_height())
+
     app._smooth_rounded_rect(
         right_card,
         1,
         1,
         right_width - 1,
         right_height - 1,
+        24,
+        fill="#ffffff",
+        outline="#d9deea",
+        width=1,
+    )
+
+    right_bottom_card.delete("all")
+    right_bottom_width = right_width
+    right_bottom_height = max(75, right_bottom_card.winfo_height()) - 10
+    app._smooth_rounded_rect(
+        right_bottom_card,
+        1,
+        1,
+        right_bottom_width - 1,
+        right_bottom_height - 1,
         24,
         fill="#ffffff",
         outline="#d9deea",
