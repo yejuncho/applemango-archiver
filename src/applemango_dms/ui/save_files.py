@@ -707,6 +707,9 @@ def show_save_files_screen(app):
     row3_inner_y1 = row3_top + 1
     row3_inner_y2 = row3_bottom - 1
     row3_height = max(1, row3_inner_y2 - row3_inner_y1)
+    row4_top = row3_bottom
+    row4_bottom = row4_top + row_heights[3]
+    row4_center_y = (row4_top + row4_bottom) // 2
 
     row3_canvas = tk.Canvas(left_detail_card, bg=row_colors[2], highlightthickness=0, bd=0)
     left_detail_card.create_window(
@@ -995,6 +998,120 @@ def show_save_files_screen(app):
             "uploading": ("업로드 중", "#2d6cdf"),
         }
         return status_map.get(status_code, status_map["standby"])
+
+    def draw_row4_summary():
+        left_detail_card.delete("row4_summary")
+
+        total_count = len(selected_files)
+        status_counts = {
+            "standby": 0,
+            "uploading": 0,
+            "success": 0,
+            "failed": 0,
+        }
+        overall_progress = 0.0
+
+        if total_count > 0:
+            for row_key in selected_files:
+                row_state = row_metadata_state.get(row_key, {})
+                status_code = row_state.get("status_code", "standby")
+                if status_code not in status_counts:
+                    status_code = "standby"
+                status_counts[status_code] += 1
+
+                ratio = float(row_state.get("progress_ratio", 0.0) or 0.0)
+                ratio = max(0.0, min(1.0, ratio))
+                overall_progress += ratio
+
+            overall_progress /= float(total_count)
+
+        uploading_count = status_counts["uploading"]
+        progress_pct_text = f"{int(round(overall_progress * 100.0))}%"
+
+        left_start_x = row2_inner_x1 + 10
+        left_detail_card.create_text(
+            left_start_x,
+            row4_center_y,
+            text="전체 진행률",
+            fill="#1f2b4a",
+            font=app._font(10, "bold"),
+            anchor="w",
+            tags=("row4_summary",),
+        )
+
+        in_progress_text = f"{uploading_count} / {total_count} 파일 업로드 중"
+        progress_text_x = left_start_x + 72
+        left_detail_card.create_text(
+            progress_text_x,
+            row4_center_y,
+            text=in_progress_text,
+            fill="#2d3448",
+            font=app._font(10),
+            anchor="w",
+            tags=("row4_summary",),
+        )
+
+        bar_x1 = row2_inner_x1 + 200
+        bar_x2 = row2_inner_x1 + 430
+        bar_y1 = row4_center_y - 5
+        bar_y2 = row4_center_y + 5
+        bar_radius = max(2, (bar_y2 - bar_y1) // 2)
+
+        app._smooth_rounded_rect(
+            left_detail_card,
+            bar_x1,
+            bar_y1,
+            bar_x2,
+            bar_y2,
+            bar_radius,
+            fill="#d7deea",
+            outline="",
+            width=0,
+            tags="row4_summary",
+        )
+
+        if overall_progress > 0:
+            fill_x2 = bar_x1 + max((bar_y2 - bar_y1), int((bar_x2 - bar_x1) * overall_progress))
+            fill_x2 = min(bar_x2, fill_x2)
+            app._smooth_rounded_rect(
+                left_detail_card,
+                bar_x1,
+                bar_y1,
+                fill_x2,
+                bar_y2,
+                bar_radius,
+                fill="#5555d5",
+                outline="",
+                width=0,
+                tags="row4_summary",
+            )
+
+        left_detail_card.create_text(
+            bar_x2 + 8,
+            row4_center_y,
+            text=progress_pct_text,
+            fill="#2d3448",
+            font=app._font(9, "bold"),
+            anchor="w",
+            tags=("row4_summary",),
+        )
+
+        right_text = (
+            f"대기 중 {status_counts['standby']}   "
+            f"업로드 중 {status_counts['uploading']}   "
+            f"완료 {status_counts['success']}   "
+            f"실패 {status_counts['failed']}"
+        )
+
+        left_detail_card.create_text(
+            row2_inner_x2 - 10,
+            row4_center_y,
+            text=right_text,
+            fill="#2d3448",
+            font=app._font(10),
+            anchor="e",
+            tags=("row4_summary",),
+        )
 
     def is_ctrl_pressed(event):
         return bool(getattr(event, "state", 0) & 0x0004)
@@ -1421,6 +1538,7 @@ def show_save_files_screen(app):
             row_canvas.tag_bind("row_cancel", "<Leave>", lambda _event, canvas=row_canvas: canvas.configure(cursor=""))
 
         update_row2_select_icon()
+        draw_row4_summary()
 
         sync_row3_scroll_region()
         apply_row3_scroll(row3_scroll_state["current"])
