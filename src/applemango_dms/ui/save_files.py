@@ -297,8 +297,25 @@ def show_save_files_screen(app):
         threading.Thread(target=upload_worker, args=(targets,), daemon=True).start()
         return None
 
-    def create_rounded_action(parent, text, command, *, width, height, fill, outline, text_color, icon_photo=None, icon_fallback_text=None):
-        button_canvas = tk.Canvas(parent, width=width, height=height, bg=parent.cget("bg"), highlightthickness=0, bd=0, cursor="hand2")
+    def create_rounded_action(
+        parent,
+        text,
+        command,
+        *,
+        width,
+        height,
+        fill,
+        outline,
+        text_color,
+        icon_photo=None,
+        icon_fallback_text=None,
+        icon_offset_x=0,
+        text_offset_x=0,
+    ):
+        # Apply a global size bump so all rounded action buttons look consistently larger.
+        render_width = width + 10
+        render_height = height + 6
+        button_canvas = tk.Canvas(parent, width=render_width, height=render_height, bg=parent.cget("bg"), highlightthickness=0, bd=0, cursor="hand2")
         if icon_photo is not None:
             # Keep a strong reference on the widget to prevent Tk image GC.
             button_canvas.icon_photo_ref = icon_photo
@@ -316,27 +333,27 @@ def show_save_files_screen(app):
                 button_canvas,
                 1,
                 1,
-                width - 1,
-                height - 1,
+                render_width - 1,
+                render_height - 1,
                 14,
                 fill=fill_color,
                 outline=outline_color,
                 width=1,
             )
 
-            text_x = width // 2
+            text_x = render_width // 2
             if icon_photo is not None:
-                icon_x = max(12, width // 2 - 30)
-                button_canvas.create_image(icon_x, height // 2, image=icon_photo, anchor="center")
-                text_x = icon_x + 12
-                button_canvas.create_text(text_x, height // 2, text=text, fill=text_color, font=app._font(10, "bold"), anchor="w")
+                icon_x = max(12, render_width // 2 - 30) + icon_offset_x
+                button_canvas.create_image(icon_x, render_height // 2, image=icon_photo, anchor="center")
+                text_x = icon_x + 12 + text_offset_x
+                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="w")
             elif icon_fallback_text:
-                icon_x = max(12, width // 2 - 30)
-                button_canvas.create_text(icon_x, height // 2, text=icon_fallback_text, fill=text_color, font=("Segoe UI Emoji", 11), anchor="center")
-                text_x = icon_x + 12
-                button_canvas.create_text(text_x, height // 2, text=text, fill=text_color, font=app._font(10, "bold"), anchor="w")
+                icon_x = max(12, render_width // 2 - 30) + icon_offset_x
+                button_canvas.create_text(icon_x, render_height // 2, text=icon_fallback_text, fill=text_color, font=("Segoe UI Emoji", 13), anchor="center")
+                text_x = icon_x + 12 + text_offset_x
+                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="w")
             else:
-                button_canvas.create_text(text_x, height // 2, text=text, fill=text_color, font=app._font(10, "bold"), anchor="center")
+                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="center")
 
         button_canvas.bind("<Button-1>", lambda _event: command())
         button_canvas.bind("<Enter>", lambda _event: draw("hover"))
@@ -552,13 +569,15 @@ def show_save_files_screen(app):
         row1_frame,
         "업로드 시작",
         start_upload_placeholder,
-        width=100,
+        width=115,
         height=30,
         fill="#5555d5",
         outline="#5555d5",
         text_color="#ffffff",
         icon_photo=upload_icon,
         icon_fallback_text="⬆",
+        icon_offset_x=-3,
+        text_offset_x=-3,
     )
     upload_btn.pack(side="right")
 
@@ -1128,6 +1147,620 @@ def show_save_files_screen(app):
             tags=("row4_summary",),
         )
 
+    def get_right_card_selected_keys():
+        return [row_key for row_key in selected_files if row_key in selected_row_keys]
+
+    right_expand_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "expand.svg",
+        max_width=12,
+        max_height=12,
+        tint="#1f2b4a",
+    )
+
+    def get_batch_date_default_text():
+        selected_keys = get_right_card_selected_keys()
+        if not selected_keys:
+            return "YYYY-MM-DD"
+
+        date_values = []
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            normalized_digits, normalized_text = normalize_date_input(row_state.get("date_digits", ""))
+            row_state["date_digits"] = normalized_digits
+            row_state["date_iso"] = normalized_text if len(normalized_text) == 10 else ""
+            date_values.append(normalized_text if len(normalized_text) == 10 else "")
+
+        first_value = date_values[0]
+        if first_value and all(value == first_value for value in date_values):
+            return first_value
+        return "YYYY-MM-DD"
+
+    def apply_batch_date_input(raw_value):
+        normalized_digits, normalized_text = normalize_date_input(raw_value)
+        selected_keys = get_right_card_selected_keys()
+        if not selected_keys:
+            return normalized_text
+
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            row_state["date_digits"] = normalized_digits
+            row_state["date_iso"] = normalized_text if len(normalized_text) == 10 else ""
+        return normalized_text
+
+    def get_batch_document_type_default_text():
+        selected_keys = get_right_card_selected_keys()
+        if not selected_keys:
+            return "---"
+
+        doc_values = []
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            current_type = (row_state.get("document_type") or "").strip()
+            if not current_type:
+                current_type = document_type_options[0] if document_type_options else "기타"
+                row_state["document_type"] = current_type
+            doc_values.append(current_type)
+
+        first_value = doc_values[0]
+        if first_value and all(value == first_value for value in doc_values):
+            return first_value
+        return "---"
+
+    def apply_batch_document_type(value_text):
+        selected_keys = get_right_card_selected_keys()
+        selected_value = (value_text or "").strip()
+        if not selected_keys or not selected_value or selected_value == "---":
+            return
+
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            row_state["document_type"] = selected_value
+
+    def get_batch_tags_default_text():
+        selected_keys = get_right_card_selected_keys()
+        if not selected_keys:
+            return ""
+
+        tag_values = []
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            tag_values.append(str(row_state.get("tags", "")))
+
+        first_value = tag_values[0]
+        if all(value == first_value for value in tag_values):
+            return first_value
+        return ""
+
+    def apply_batch_tags_input(raw_value):
+        selected_keys = get_right_card_selected_keys()
+        tag_text = str(raw_value or "")
+        if not selected_keys:
+            return tag_text
+
+        for row_key in selected_keys:
+            row_state = row_metadata_state.setdefault(row_key, {})
+            row_state["tags"] = tag_text
+        return tag_text
+
+    def is_descendant_widget(widget, ancestor):
+        current = widget
+        while current is not None:
+            if current == ancestor:
+                return True
+            current = getattr(current, "master", None)
+        return False
+
+    def handle_save_files_global_click(event):
+        active_card = getattr(app, "_save_files_active_right_card", None)
+        if active_card is None or not active_card.winfo_exists():
+            return
+
+        clicked_widget = app.root.winfo_containing(event.x_root, event.y_root)
+        if clicked_widget is None:
+            return
+
+        date_entry = getattr(active_card, "batch_date_entry_ref", None)
+        tag_entry = getattr(active_card, "batch_tag_entry_ref", None)
+        popup = getattr(active_card, "doc_type_popup_ref", None)
+        close_popup = getattr(active_card, "close_doc_type_popup_ref", None)
+
+        if popup is not None and popup.winfo_exists() and is_descendant_widget(clicked_widget, popup):
+            return
+
+        try:
+            local_x = event.x_root - active_card.winfo_rootx()
+            local_y = event.y_root - active_card.winfo_rooty()
+        except Exception:
+            return
+
+        date_bounds = getattr(active_card, "date_field_bounds", None)
+        doc_bounds = getattr(active_card, "doc_field_bounds", None)
+        tag_bounds = getattr(active_card, "tag_field_bounds", None)
+
+        in_date_field = False
+        if date_bounds:
+            x1, y1, x2, y2 = date_bounds
+            in_date_field = x1 <= local_x <= x2 and y1 <= local_y <= y2
+
+        in_doc_field = False
+        if doc_bounds:
+            x1, y1, x2, y2 = doc_bounds
+            in_doc_field = x1 <= local_x <= x2 and y1 <= local_y <= y2
+
+        in_tag_field = False
+        if tag_bounds:
+            x1, y1, x2, y2 = tag_bounds
+            in_tag_field = x1 <= local_x <= x2 and y1 <= local_y <= y2
+
+        if date_entry is not None and date_entry.winfo_exists() and not in_date_field:
+            focused_widget = app.root.focus_get()
+            if focused_widget is not None and is_descendant_widget(focused_widget, date_entry):
+                active_card.focus_set()
+
+        if tag_entry is not None and tag_entry.winfo_exists() and not in_tag_field:
+            focused_widget = app.root.focus_get()
+            if focused_widget is not None and is_descendant_widget(focused_widget, tag_entry):
+                active_card.focus_set()
+
+        if popup is not None and popup.winfo_exists() and not in_doc_field:
+            if callable(close_popup):
+                close_popup()
+
+    if not getattr(app, "_save_files_global_click_bound", False):
+        app.root.bind_all("<Button-1>", handle_save_files_global_click, add="+")
+        app._save_files_global_click_bound = True
+
+    def draw_right_card():
+        right_card.delete("all")
+        app._save_files_active_right_card = right_card
+        right_width = min(245, right_card.winfo_width())
+        right_height = min(400, right_card.winfo_height())
+
+        # Keep spacing deterministic as more right-card controls are added.
+        card_pad_x = 12
+        title_y = 14
+        title_to_section_gap = 45
+        section_gap = 35
+        label_to_field_gap = 26
+        field_height = 30
+        field_radius = 12
+
+        app._smooth_rounded_rect(
+            right_card,
+            1,
+            1,
+            right_width - 1,
+            right_height - 1,
+            24,
+            fill="#ffffff",
+            outline="#d9deea",
+            width=1,
+        )
+
+        selected_count = len(get_right_card_selected_keys())
+        right_title_text = f"선택한 파일 설정 ({selected_count})"
+        right_card.create_text(
+            card_pad_x,
+            title_y,
+            text=right_title_text,
+            fill="#1f2b4a",
+            font=app._font(12, "bold"),
+            anchor="nw",
+        )
+
+        date_label_y = title_y + title_to_section_gap
+
+        right_card.create_text(
+            card_pad_x,
+            date_label_y,
+            text="날짜",
+            fill="#1f2b4a",
+            font=app._font(12, "bold"),
+            anchor="nw",
+        )
+
+        date_field_x1 = card_pad_x
+        date_field_y1 = date_label_y + label_to_field_gap
+        date_field_width = max(120, right_width - (card_pad_x * 2))
+        date_field_x2 = date_field_x1 + date_field_width
+        date_field_y2 = date_field_y1 + field_height
+        right_card.date_field_bounds = (date_field_x1, date_field_y1, date_field_x2, date_field_y2)
+
+        app._smooth_rounded_rect(
+            right_card,
+            date_field_x1,
+            date_field_y1,
+            date_field_x2,
+            date_field_y2,
+            field_radius,
+            fill="#ffffff",
+            outline="#c8d0e6",
+            width=1,
+        )
+
+        field_click_area_id = right_card.create_rectangle(
+            date_field_x1,
+            date_field_y1,
+            date_field_x2,
+            date_field_y2,
+            fill="",
+            outline="",
+            tags=("batch_date_field_click",),
+        )
+
+        batch_date_var = tk.StringVar(value=get_batch_date_default_text())
+        batch_date_entry = tk.Entry(
+            right_card,
+            textvariable=batch_date_var,
+            font=app._font(12),
+            justify="left",
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
+            bg="#ffffff",
+            fg="#1f2b4a",
+            insertbackground="#1f2b4a",
+        )
+
+        def on_batch_date_focus_in(_event, var=batch_date_var):
+            if var.get() in {"YYYY-MM-DD", "yyyy-mm-dd"}:
+                var.set("")
+
+        def on_batch_date_key_release(_event, var=batch_date_var, entry_widget=batch_date_entry):
+            _digits, normalized_text = normalize_date_input(var.get())
+            var.set(normalized_text)
+            entry_widget.icursor(tk.END)
+
+        def commit_batch_date_changes(_event=None):
+            return None
+
+        def focus_batch_date_entry(_event=None, entry_widget=batch_date_entry):
+            try:
+                entry_widget.focus_force()
+            except Exception:
+                entry_widget.focus_set()
+            entry_widget.icursor(tk.END)
+            return "break"
+
+        def on_batch_date_return(_event=None):
+            right_card.focus_set()
+            return "break"
+
+        batch_date_entry.bind("<FocusIn>", on_batch_date_focus_in)
+        batch_date_entry.bind("<KeyRelease>", on_batch_date_key_release)
+        batch_date_entry.bind("<FocusOut>", commit_batch_date_changes)
+        batch_date_entry.bind("<Return>", on_batch_date_return)
+        batch_date_entry.bind("<Button-1>", focus_batch_date_entry, add="+")
+        right_card.tag_bind("batch_date_field_click", "<Button-1>", focus_batch_date_entry)
+        right_card.create_window(
+            date_field_x1 + 10,
+            (date_field_y1 + date_field_y2) / 2.0,
+            window=batch_date_entry,
+            width=max(60, date_field_width - 20),
+            height=max(20, field_height - 8),
+            anchor="w",
+        )
+        right_card.tag_raise("batch_date_field_click")
+        right_card.tag_raise(field_click_area_id)
+
+        # Keep this as the regular gap between sections.
+        doc_label_y = date_field_y2 + section_gap
+        right_card.create_text(
+            card_pad_x,
+            doc_label_y,
+            text="문서 유형",
+            fill="#1f2b4a",
+            font=app._font(12, "bold"),
+            anchor="nw",
+        )
+
+        doc_field_x1 = card_pad_x
+        doc_field_y1 = doc_label_y + label_to_field_gap
+        doc_field_width = date_field_width
+        doc_field_x2 = doc_field_x1 + doc_field_width
+        doc_field_y2 = doc_field_y1 + field_height
+        right_card.doc_field_bounds = (doc_field_x1, doc_field_y1, doc_field_x2, doc_field_y2)
+
+        app._smooth_rounded_rect(
+            right_card,
+            doc_field_x1,
+            doc_field_y1,
+            doc_field_x2,
+            doc_field_y2,
+            field_radius,
+            fill="#ffffff",
+            outline="#c8d0e6",
+            width=1,
+        )
+
+        doc_type_var = tk.StringVar(value=get_batch_document_type_default_text())
+
+        doc_text_id = right_card.create_text(
+            doc_field_x1 + 10,
+            (doc_field_y1 + doc_field_y2) / 2.0,
+            text=doc_type_var.get(),
+            fill="#8f96ad" if doc_type_var.get() == "---" else "#1f2b4a",
+            font=app._font(12),
+            anchor="w",
+            tags=("batch_doc_type_field_click",),
+        )
+
+        expand_icon_x = doc_field_x2 - 12
+        expand_icon_y = (doc_field_y1 + doc_field_y2) / 2.0
+        if right_expand_icon is not None:
+            right_card.create_image(
+                expand_icon_x,
+                expand_icon_y,
+                image=right_expand_icon,
+                anchor="center",
+                tags=("batch_doc_type_field_click",),
+            )
+        else:
+            right_card.create_text(
+                expand_icon_x,
+                expand_icon_y,
+                text="▾",
+                fill="#1f2b4a",
+                font=app._font(11, "bold"),
+                anchor="center",
+                tags=("batch_doc_type_field_click",),
+            )
+
+        right_card.create_rectangle(
+            doc_field_x1,
+            doc_field_y1,
+            doc_field_x2,
+            doc_field_y2,
+            fill="",
+            outline="",
+            tags=("batch_doc_type_field_click",),
+        )
+
+        def update_doc_type_display():
+            value = (doc_type_var.get() or "---").strip() or "---"
+            doc_type_var.set(value)
+            right_card.itemconfigure(doc_text_id, text=value)
+            right_card.itemconfigure(doc_text_id, fill="#8f96ad" if value == "---" else "#1f2b4a")
+
+        def close_doc_type_popup():
+            popup = getattr(right_card, "doc_type_popup_ref", None)
+            if popup is not None and popup.winfo_exists():
+                popup.destroy()
+            right_card.doc_type_popup_ref = None
+
+        right_card.close_doc_type_popup_ref = close_doc_type_popup
+
+        def on_doc_type_chosen(chosen_value):
+            doc_type_var.set(chosen_value)
+            update_doc_type_display()
+            close_doc_type_popup()
+
+        def open_doc_type_popup(_event=None):
+            popup = getattr(right_card, "doc_type_popup_ref", None)
+            if popup is not None and popup.winfo_exists():
+                close_doc_type_popup()
+                return "break"
+
+            popup_width = int(doc_field_width)
+            popup_rows = max(1, min(8, len(document_type_options)))
+            popup_height = (popup_rows * 24) + 6
+            popup_x = right_card.winfo_rootx() + int(doc_field_x1)
+            popup_y = right_card.winfo_rooty() + int(doc_field_y2) + 2
+
+            popup = tk.Toplevel(app.root)
+            popup.overrideredirect(True)
+            popup.transient(app.root)
+            popup.configure(bg="#c8d0e6")
+            popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+            popup.lift()
+            popup.focus_force()
+
+            body = tk.Frame(popup, bg="#ffffff", highlightthickness=1, highlightbackground="#c8d0e6")
+            body.pack(fill="both", expand=True)
+
+            listbox = tk.Listbox(
+                body,
+                bd=0,
+                highlightthickness=0,
+                activestyle="none",
+                selectmode="browse",
+                font=app._font(10),
+                fg="#1f2b4a",
+                bg="#ffffff",
+            )
+            scrollbar = tk.Scrollbar(body, orient="vertical", command=listbox.yview)
+            listbox.configure(yscrollcommand=scrollbar.set)
+
+            listbox.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+
+            for item in document_type_options:
+                listbox.insert(tk.END, item)
+
+            current_value = doc_type_var.get().strip()
+            if current_value in document_type_options:
+                current_index = document_type_options.index(current_value)
+                listbox.selection_set(current_index)
+                listbox.see(current_index)
+
+            def commit_selection(_event=None):
+                selection = listbox.curselection()
+                if not selection:
+                    return "break"
+                chosen = listbox.get(selection[0])
+                on_doc_type_chosen(chosen)
+                return "break"
+
+            listbox.bind("<ButtonRelease-1>", commit_selection)
+            listbox.bind("<Double-Button-1>", commit_selection)
+            listbox.bind("<Return>", commit_selection)
+            popup.bind("<Escape>", lambda _event: close_doc_type_popup())
+            popup.after(0, lambda: listbox.focus_set())
+
+            right_card.doc_type_popup_ref = popup
+            return "break"
+
+        def on_right_card_click(event):
+            click_x = event.x
+            click_y = event.y
+
+            in_date_field = date_field_x1 <= click_x <= date_field_x2 and date_field_y1 <= click_y <= date_field_y2
+            if in_date_field:
+                focus_batch_date_entry()
+                return "break"
+
+            in_doc_field = doc_field_x1 <= click_x <= doc_field_x2 and doc_field_y1 <= click_y <= doc_field_y2
+            if in_doc_field:
+                return open_doc_type_popup()
+
+            in_tag_field = tag_field_x1 <= click_x <= tag_field_x2 and tag_field_y1 <= click_y <= tag_field_y2
+            if in_tag_field:
+                focus_batch_tag_entry()
+                return "break"
+
+            close_doc_type_popup()
+            return None
+
+        tag_label_y = doc_field_y2 + section_gap
+        right_card.create_text(
+            card_pad_x,
+            tag_label_y,
+            text="태그",
+            fill="#1f2b4a",
+            font=app._font(12, "bold"),
+            anchor="nw",
+        )
+
+        tag_field_x1 = card_pad_x
+        tag_field_y1 = tag_label_y + label_to_field_gap
+        tag_field_width = date_field_width
+        tag_field_x2 = tag_field_x1 + tag_field_width
+        tag_field_y2 = tag_field_y1 + field_height
+        right_card.tag_field_bounds = (tag_field_x1, tag_field_y1, tag_field_x2, tag_field_y2)
+
+        app._smooth_rounded_rect(
+            right_card,
+            tag_field_x1,
+            tag_field_y1,
+            tag_field_x2,
+            tag_field_y2,
+            field_radius,
+            fill="#ffffff",
+            outline="#c8d0e6",
+            width=1,
+        )
+
+        right_card.create_rectangle(
+            tag_field_x1,
+            tag_field_y1,
+            tag_field_x2,
+            tag_field_y2,
+            fill="",
+            outline="",
+            tags=("batch_tag_field_click",),
+        )
+
+        batch_tag_var = tk.StringVar(value=get_batch_tags_default_text())
+        batch_tag_entry = tk.Entry(
+            right_card,
+            textvariable=batch_tag_var,
+            font=app._font(12),
+            justify="left",
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
+            bg="#ffffff",
+            fg="#1f2b4a",
+            insertbackground="#1f2b4a",
+        )
+
+        def on_batch_tag_key_release(_event, var=batch_tag_var, entry_widget=batch_tag_entry):
+            entry_widget.icursor(tk.END)
+
+        def commit_batch_tag_changes(_event=None):
+            return None
+
+        def on_batch_tag_return(_event=None):
+            right_card.focus_set()
+            return "break"
+
+        def focus_batch_tag_entry(_event=None, entry_widget=batch_tag_entry):
+            try:
+                entry_widget.focus_force()
+            except Exception:
+                entry_widget.focus_set()
+            entry_widget.icursor(tk.END)
+            return "break"
+
+        batch_tag_entry.bind("<KeyRelease>", on_batch_tag_key_release)
+        batch_tag_entry.bind("<FocusOut>", commit_batch_tag_changes)
+        batch_tag_entry.bind("<Return>", on_batch_tag_return)
+        batch_tag_entry.bind("<Button-1>", focus_batch_tag_entry, add="+")
+        right_card.tag_bind("batch_tag_field_click", "<Button-1>", focus_batch_tag_entry)
+        right_card.create_window(
+            tag_field_x1 + 10,
+            (tag_field_y1 + tag_field_y2) / 2.0,
+            window=batch_tag_entry,
+            width=max(60, tag_field_width - 20),
+            height=max(20, field_height - 8),
+            anchor="w",
+        )
+
+        def apply_selected_batch_settings():
+            selected_keys = get_right_card_selected_keys()
+            if not selected_keys:
+                return None
+
+            date_input = (batch_date_var.get() or "").strip()
+            if date_input and date_input.lower() != "yyyy-mm-dd":
+                normalized_digits, normalized_text = normalize_date_input(date_input)
+                if normalized_digits:
+                    for row_key in selected_keys:
+                        row_state = row_metadata_state.setdefault(row_key, {})
+                        row_state["date_digits"] = normalized_digits
+                        row_state["date_iso"] = normalized_text if len(normalized_text) == 10 else ""
+
+            selected_doc_type = (doc_type_var.get() or "").strip()
+            if selected_doc_type and selected_doc_type != "---":
+                apply_batch_document_type(selected_doc_type)
+
+            tag_text = str(batch_tag_var.get() or "")
+            for row_key in selected_keys:
+                row_state = row_metadata_state.setdefault(row_key, {})
+                row_state["tags"] = tag_text
+
+            refresh_row3_rows()
+            return None
+
+        apply_button = create_rounded_action(
+            right_card,
+            "선택 항목에 적용",
+            apply_selected_batch_settings,
+            width=125,
+            height=30,
+            fill="#5555d5",
+            outline="#5555d5",
+            text_color="#ffffff",
+        )
+        right_card.create_window(
+            right_width / 2.0,
+            max(0, right_height - 30),
+            window=apply_button,
+            anchor="center",
+        )
+
+        right_card.bind("<Button-1>", on_right_card_click)
+        update_doc_type_display()
+
+        # Keep references to prevent Tk widgets/variables from being GC'ed.
+        right_card.batch_date_var_ref = batch_date_var
+        right_card.batch_date_entry_ref = batch_date_entry
+        right_card.batch_doc_type_var_ref = doc_type_var
+        right_card.batch_tag_var_ref = batch_tag_var
+        right_card.batch_tag_entry_ref = batch_tag_entry
+        right_card.batch_apply_button_ref = apply_button
+        right_card.right_expand_icon_ref = right_expand_icon
+
     def is_ctrl_pressed(event):
         return bool(getattr(event, "state", 0) & 0x0004)
 
@@ -1554,6 +2187,7 @@ def show_save_files_screen(app):
 
         update_row2_select_icon()
         draw_row4_summary()
+        draw_right_card()
 
         sync_row3_scroll_region()
         apply_row3_scroll(row3_scroll_state["current"])
@@ -1575,24 +2209,10 @@ def show_save_files_screen(app):
 
     right_col.update_idletasks()
 
-    right_card.delete("all")
-    right_width = min(245, right_card.winfo_width())
-    right_height = min(400, right_card.winfo_height())
-
-    app._smooth_rounded_rect(
-        right_card,
-        1,
-        1,
-        right_width - 1,
-        right_height - 1,
-        24,
-        fill="#ffffff",
-        outline="#d9deea",
-        width=1,
-    )
+    draw_right_card()
 
     right_bottom_card.delete("all")
-    right_bottom_width = right_width
+    right_bottom_width = min(245, right_bottom_card.winfo_width())
     right_bottom_height = max(75, right_bottom_card.winfo_height()) - 10
     app._smooth_rounded_rect(
         right_bottom_card,
