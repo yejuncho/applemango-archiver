@@ -401,7 +401,7 @@ def show_save_files_screen(app):
         drop_width - 1,
         drop_height - 1,
         20,
-        fill="#f8faff",
+        fill="#ffffff",
         outline="#b9c8e9",
         width=2.5,
         dash=(4, 4),
@@ -422,7 +422,7 @@ def show_save_files_screen(app):
         tint="#ffffff",
     )
 
-    drop_button_row = tk.Frame(drop_area, bg="#f8faff")
+    drop_button_row = tk.Frame(drop_area, bg="#ffffff")
     add_file_btn = create_rounded_action(
         drop_button_row,
         "파일 추가",

@@ -265,32 +265,6 @@ class SequenceArchiverApp:
             child.destroy()
 
     @staticmethod
-    def _blend_hex(c1, c2, ratio):
-        c1 = c1.lstrip("#")
-        c2 = c2.lstrip("#")
-        r1, g1, b1 = int(c1[0:2], 16), int(c1[2:4], 16), int(c1[4:6], 16)
-        r2, g2, b2 = int(c2[0:2], 16), int(c2[2:4], 16), int(c2[4:6], 16)
-        r = int(r1 + (r2 - r1) * ratio)
-        g = int(g1 + (g2 - g1) * ratio)
-        b = int(b1 + (b2 - b1) * ratio)
-        return f"#{r:02x}{g:02x}{b:02x}"
-
-    def _draw_login_gradient(self, width, height):
-        if not self.login_bg_canvas or not self.login_bg_canvas.winfo_exists():
-            return
-        self.login_bg_canvas.delete("grad")
-        lines = 80
-        top = "#f8f8ff"
-        bottom = "#ede9ff"
-        step_h = max(1, int(height / lines))
-        for i in range(lines):
-            ratio = (i / max(1, lines - 1)) ** 1.25
-            color = self._blend_hex(top, bottom, ratio)
-            y0 = i * step_h
-            y1 = min(height, y0 + step_h + 1)
-            self.login_bg_canvas.create_rectangle(0, y0, width, y1, fill=color, outline=color, tags="grad")
-
-    @staticmethod
     def _resize_image_fit(image, max_width, max_height):
         if Image is None:
             return None
@@ -544,45 +518,6 @@ class SequenceArchiverApp:
         y = max(0, (sh - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    def _draw_rounded_rect(self, canvas, x1, y1, x2, y2, radius, fill, outline, width=1, tags=""):
-        r = max(1, int(min(radius, (x2 - x1) / 2, (y2 - y1) / 2)))
-
-        canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline="", tags=tags)
-        canvas.create_rectangle(x1, y1 + r, x2, y2 - r, fill=fill, outline="", tags=tags)
-
-        canvas.create_oval(x1, y1, x1 + 2 * r, y1 + 2 * r, fill=fill, outline="", tags=tags)
-        canvas.create_oval(x2 - 2 * r, y1, x2, y1 + 2 * r, fill=fill, outline="", tags=tags)
-        canvas.create_oval(x1, y2 - 2 * r, x1 + 2 * r, y2, fill=fill, outline="", tags=tags)
-        canvas.create_oval(x2 - 2 * r, y2 - 2 * r, x2, y2, fill=fill, outline="", tags=tags)
-
-        if width > 0:
-            canvas.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style="arc", outline=outline, width=width, tags=tags)
-            canvas.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style="arc", outline=outline, width=width, tags=tags)
-            canvas.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style="arc", outline=outline, width=width, tags=tags)
-            canvas.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style="arc", outline=outline, width=width, tags=tags)
-
-            canvas.create_line(x1 + r, y1, x2 - r, y1, fill=outline, width=width, tags=tags)
-            canvas.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=width, tags=tags)
-            canvas.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=width, tags=tags)
-            canvas.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=width, tags=tags)
-
-    def _draw_horizontal_gradient_rounded(self, canvas, x1, y1, x2, y2, radius, start_color, end_color, tags=""):
-        r = max(1, int(min(radius, (x2 - x1) / 2, (y2 - y1) / 2)))
-        width_px = max(1, int(x2 - x1))
-        for i in range(width_px):
-            ratio = i / max(1, width_px - 1)
-            color = self._blend_hex(start_color, end_color, ratio)
-            x = x1 + i
-            if i < r:
-                dx = r - i
-                dy = int(r - max(0.0, (r * r - dx * dx)) ** 0.5)
-            elif i > width_px - r:
-                dx = i - (width_px - r)
-                dy = int(r - max(0.0, (r * r - dx * dx)) ** 0.5)
-            else:
-                dy = 0
-            canvas.create_line(x, y1 + dy, x, y2 - dy, fill=color, tags=tags)
-
     def _smooth_rounded_rect(self, canvas, x1, y1, x2, y2, radius, fill="", outline="", width=1, tags="", dash=None):
         """Smooth rounded rectangle using B-spline polygon — no rough arc joints."""
         r = max(2, min(radius, int((x2 - x1) / 2), int((y2 - y1) / 2)))
@@ -605,11 +540,8 @@ class SequenceArchiverApp:
             fill=fill, outline=outline, width=width, tags=tags, dash=dash,
         )
 
-    def create_login_card(self, parent, width=360, height=470, fill_top="#f9f8ff", fill_bottom="#f9f8ff", radius=22):
-        """Draw the card as smooth polygons directly on parent canvas.
-        No rectangular Frame/Canvas widget is used, so corners are always clean.
-        """
-        content = tk.Frame(parent, bg="#f9f8ff")
+    def create_card(self, parent, width=360, height=470, fill_top="#ffffff", fill_bottom="#ffffff", radius=22):
+        content = tk.Frame(parent, bg="#ffffff")
         content_id = parent.create_window(0, 0, window=content, anchor="center")
 
         def redraw(cx, cy):
@@ -621,25 +553,15 @@ class SequenceArchiverApp:
             x2, y2 = cx + width // 2, cy + height // 2
             r = radius
 
-            # Layered soft shadow — darkest/furthest drawn first (lower z)
-            self._smooth_rounded_rect(parent, x1 + 7, y1 + 9, x2 + 7, y2 + 9, r,
-                                      fill="#d8d5f0", outline="", tags="cardshadow")
-            self._smooth_rounded_rect(parent, x1 + 4, y1 + 5, x2 + 4, y2 + 5, r,
-                                      fill="#e5e3f5", outline="", tags="cardshadow")
-            self._smooth_rounded_rect(parent, x1 + 2, y1 + 2, x2 + 2, y2 + 2, r,
-                                      fill="#eeedf8", outline="", tags="cardshadow")
+            self._smooth_rounded_rect(parent, x1 + 7, y1 + 9, x2 + 7, y2 + 9, r, fill="#d8d5f0", outline="", tags="cardshadow")
+            self._smooth_rounded_rect(parent, x1 + 4, y1 + 5, x2 + 4, y2 + 5, r, fill="#e5e3f5", outline="", tags="cardshadow")
+            self._smooth_rounded_rect(parent, x1 + 2, y1 + 2, x2 + 2, y2 + 2, r, fill="#eeedf8", outline="", tags="cardshadow")
 
-            # Card fill then subtle border
-            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
-                                      fill=fill_bottom, outline="", tags="cardfill")
-            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
-                                      fill=fill_top, outline="", tags="cardfill")
-            self._smooth_rounded_rect(parent, x1 + 1, y1 + 1, x2 - 1, y2 - 7, r,
-                                      fill=fill_top, outline="", tags="cardfill")
-            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r,
-                                      fill="", outline="#e4e6f0", width=1, tags="cardborder")
+            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r, fill=fill_bottom, outline="", tags="cardfill")
+            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r, fill=fill_top, outline="", tags="cardfill")
+            self._smooth_rounded_rect(parent, x1 + 1, y1 + 1, x2 - 1, y2 - 7, r, fill=fill_top, outline="", tags="cardfill")
+            self._smooth_rounded_rect(parent, x1, y1, x2, y2, r, fill="", outline="#e4e6f0", width=1, tags="cardborder")
 
-            # Resize and re-center content frame, then raise above all card shapes
             parent.itemconfigure(content_id, width=width - 56, height=height - 56)
             parent.coords(content_id, cx, cy)
             parent.tag_raise(content_id)
@@ -650,219 +572,6 @@ class SequenceArchiverApp:
             "size": (width, height),
             "redraw": redraw,
         }
-
-    def _prepare_login_layout(self):
-        target_w = 420
-        target_h = 560
-        self._center_window(target_w, target_h)
-        self._apply_fullscreen_mode()
-        self.root.title("애플망고 DMS - 로그인")
-        self.clear_screen()
-        self.root.configure(bg="#f8f8ff")
-
-        bg = tk.Canvas(self.root, bg="#f8f8ff", highlightthickness=0, bd=0)
-        bg.pack(fill="both", expand=True)
-        self.login_bg_canvas = bg
-
-        card_info = self.create_login_card(bg, height=494)
-        content = card_info["content"]
-        card_redraw = card_info["redraw"]
-
-        def on_bg_resize(event):
-            self._draw_login_gradient(event.width, event.height)
-            card_redraw(event.width // 2, event.height // 2)
-
-        bg.bind("<Configure>", on_bg_resize)
-
-        self.login_card = None
-        self.login_content = content
-
-    def create_rounded_entry(self, parent, placeholder, icon_key, is_password=False):
-        wrapper = tk.Frame(parent, bg="#f9f8ff")
-        canvas = tk.Canvas(wrapper, height=52, bg="#f9f8ff", highlightthickness=0, bd=0)
-        canvas.pack(fill="x")
-
-        inner = tk.Frame(canvas, bg="#ffffff")
-        inner_id = canvas.create_window(10, 5, window=inner, anchor="nw", height=42)
-
-        leading_icon = self.login_icon_photos.get(icon_key)
-        icon_label = tk.Label(inner, bg="#ffffff", fg="#868cab")
-        if leading_icon is not None:
-            icon_label.configure(image=leading_icon)
-            icon_label.image = leading_icon
-        else:
-            fallback_text = "👤" if icon_key == "username" else "🔒"
-            icon_label.configure(text=fallback_text, font=("Segoe UI Emoji", 11))
-        icon_label.pack(side="left", padx=(12, 9))
-
-        value_var = tk.StringVar(value="")
-        entry = tk.Entry(
-            inner,
-            textvariable=value_var,
-            show="*" if is_password else "",
-            font=self._font(12),
-            bd=0,
-            relief="flat",
-            highlightthickness=0,
-            bg="#ffffff",
-            fg="#1d2138",
-            insertbackground="#06012a",
-            insertontime=600,
-            insertofftime=400,
-            insertwidth=2,
-        )
-        entry.pack(side="left", fill="both", expand=True, pady=8)
-
-        # clicking anywhere in the field area focuses the entry
-        canvas.bind("<Button-1>", lambda _e: entry.focus_set())
-        inner.bind("<Button-1>", lambda _e: entry.focus_set())
-        icon_label.bind("<Button-1>", lambda _e: entry.focus_set())
-
-        placeholder_label = tk.Label(inner, text=placeholder, font=self._font(11), bg="#ffffff", fg="#a0a3b8")
-        placeholder_label.place(x=42, y=9)
-        placeholder_label.bind("<Button-1>", lambda _e: entry.focus_set())
-
-        field_state = {
-            "focused": False,
-            "password_visible": False,
-        }
-
-        eye_label = None
-        if is_password:
-            eye_icon = self.login_icon_photos.get("password_visible")
-            eye_label = tk.Label(inner, bg="#ffffff", fg="#8086a3", cursor="hand2")
-            if eye_icon is not None:
-                eye_label.configure(image=eye_icon)
-                eye_label.image = eye_icon
-            else:
-                eye_label.configure(text="\U0001f441", font=("Segoe UI Emoji", 13))
-            eye_label.pack(side="right", padx=(6, 12))
-            eye_label.bind("<Button-1>", lambda _e: self.toggle_password_visibility(entry, field_state, eye_label))
-
-        def redraw_field(border_color):
-            canvas.delete("field")
-            w = max(40, canvas.winfo_width())
-            h = max(40, canvas.winfo_height())
-            # smooth fill then smooth border as two separate polygons
-            self._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16,
-                                      fill="#ffffff", outline="", width=0, tags="field")
-            self._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16,
-                                      fill="", outline=border_color, width=1, tags="field")
-            canvas.tag_lower("field")  # keep shapes behind the inner frame window
-            canvas.itemconfigure(inner_id, width=max(10, w - 20))
-
-        def update_placeholder(*_args):
-            if value_var.get() or field_state["focused"]:
-                placeholder_label.place_forget()
-            else:
-                placeholder_label.place(x=42, y=9)
-
-        def on_focus_in(_event):
-            field_state["focused"] = True
-            redraw_field("#06012a")
-            placeholder_label.place_forget()  # always hide so cursor is visible
-
-        def on_focus_out(_event):
-            field_state["focused"] = False
-            redraw_field("#e4e6f0")
-            update_placeholder()  # re-show only if field is empty
-
-        canvas.bind("<Configure>", lambda _e: redraw_field("#06012a" if field_state["focused"] else "#e4e6f0"))
-        entry.bind("<FocusIn>", on_focus_in)
-        entry.bind("<FocusOut>", on_focus_out)
-        value_var.trace_add("write", update_placeholder)
-
-        redraw_field("#e4e6f0")
-        update_placeholder()
-
-        return {
-            "wrapper": wrapper,
-            "entry": entry,
-            "var": value_var,
-            "get_value": lambda: value_var.get().strip(),
-            "set_value": lambda value: value_var.set(value),
-            "focus": lambda: entry.focus_set(),
-            "eye": eye_label,
-        }
-
-    def toggle_password_visibility(self, entry_widget, field_state, eye_widget=None):
-        field_state["password_visible"] = not field_state["password_visible"]
-        if field_state["password_visible"]:
-            entry_widget.configure(show="")
-            if eye_widget is not None:
-                hide_icon = self.login_icon_photos.get("password_invisible")
-                if hide_icon is not None:
-                    eye_widget.configure(image=hide_icon, text="")
-                    eye_widget.image = hide_icon
-                else:
-                    eye_widget.configure(text="\U0001f648")  # 🙈 = visible, click to hide
-        else:
-            entry_widget.configure(show="*")
-            if eye_widget is not None:
-                show_icon = self.login_icon_photos.get("password_visible")
-                if show_icon is not None:
-                    eye_widget.configure(image=show_icon, text="")
-                    eye_widget.image = show_icon
-                else:
-                    eye_widget.configure(text="\U0001f441")  # 👁 = hidden, click to reveal
-
-    def _create_primary_login_button(self, parent, text, command):
-        canvas = tk.Canvas(parent, height=52, bg="#f9f8ff", highlightthickness=0, bd=0, cursor="arrow")
-
-        state = {
-            "enabled": False,
-            "hover": False,
-        }
-
-        def render():
-            canvas.delete("btn")
-            w = max(120, canvas.winfo_width())
-            h = max(52, canvas.winfo_height())
-
-            if state["enabled"]:
-                start = "#06012a"
-                end = "#2a2559" if not state["hover"] else "#37306c"
-                border = "#19144a"
-                text_color = "white"
-                cursor = "hand2"
-            else:
-                start = "#b8bdd1"
-                end = "#c5c9d9"
-                border = "#b8bdd1"
-                text_color = "#f6f7fb"
-                cursor = "arrow"
-
-            canvas.configure(cursor=cursor)
-            self._draw_horizontal_gradient_rounded(canvas, 1, 1, w - 1, h - 1, 16, start, end, tags="btn")
-            self._draw_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill="", outline=border, width=1, tags="btn")
-            canvas.create_text(w // 2, h // 2, text=text, fill=text_color, font=self._font(13, "bold"), tags="btn")
-
-        def on_enter(_event):
-            state["hover"] = True
-            render()
-
-        def on_leave(_event):
-            state["hover"] = False
-            render()
-
-        def on_click(_event):
-            if state["enabled"]:
-                command()
-
-        canvas.bind("<Configure>", lambda _e: render())
-        canvas.bind("<Enter>", on_enter)
-        canvas.bind("<Leave>", on_leave)
-        canvas.bind("<Button-1>", on_click)
-
-        def set_enabled(enabled):
-            state["enabled"] = bool(enabled)
-            if not state["enabled"]:
-                state["hover"] = False
-            render()
-
-        canvas.set_enabled = set_enabled
-        render()
-        return canvas
 
     def get_connection_snapshot(self):
         is_connected, ip_addr = check_server_availability(config.default_server_name)
@@ -945,12 +654,12 @@ class SequenceArchiverApp:
         self._resize(1372, 900)
         self.root.title("애플망고 DMS - 워크스페이스")
         self.clear_screen()
-        self.root.configure(bg="#edf2fb")
+        self.root.configure(bg="#ffffff")
 
-        bg = tk.Canvas(self.root, bg="#edf2fb", highlightthickness=0, bd=0)
+        bg = tk.Canvas(self.root, bg="#ffffff", highlightthickness=0, bd=0)
         bg.pack(fill="both", expand=True)
 
-        main_card = self.create_login_card(
+        main_card = self.create_card(
             bg,
             width=1272,
             height=798,

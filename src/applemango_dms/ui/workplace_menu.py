@@ -6,7 +6,6 @@ from pathlib import Path
 import applemango_dms.state as state
 import applemango_dms.config as config
 
-
 def _get_nas_storage_usage_bytes(app):
     if state.is_demo_mode:
         return 0, 0
@@ -41,7 +40,6 @@ def _get_nas_storage_usage_bytes(app):
 
     return 0, 0
 
-
 def _format_nas_usage_display(used_bytes, total_bytes):
     used = max(0, int(used_bytes or 0))
     total = max(0, int(total_bytes or 0))
@@ -70,7 +68,6 @@ def _format_nas_usage_display(used_bytes, total_bytes):
         "percent_text": f"{percent:.2f}%",
         "ratio": ratio,
     }
-
 
 def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     rows = []
@@ -173,7 +170,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             desc,
             command,
             icon_fg,
-            active_bg="#f7f9fd",
+            active_bg="#ffffff",
             is_last=(idx == total - 1),
         )
 
@@ -204,7 +201,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             width - 1,
             height - 1,
             20,
-            fill="#fdfefe",
+            fill="#ffffff",
             outline="#d9deea",
             width=1,
             tags="usage",
@@ -288,14 +285,12 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
 
     return rows
 
-
 def show_main_workspace_menu(app):
     if not state.active_workspace:
         app.show_workspace_selection_screen()
         return
 
     app.show_save_files_screen()
-
 
 def show_workspace_exit_screen(app):
     shell = app._create_workspace_shell()

@@ -1077,7 +1077,7 @@ class SequenceArchiverApp:
             fill=fill, outline=outline, width=width, tags=tags,
         )
 
-    def create_login_card(self, parent, width=360, height=470):
+    def create_card(self, parent, width=360, height=470):
         """Draw the card as smooth polygons directly on parent canvas.
         No rectangular Frame/Canvas widget is used, so corners are always clean.
         """
@@ -1131,7 +1131,7 @@ class SequenceArchiverApp:
         bg.pack(fill="both", expand=True)
         self.login_bg_canvas = bg
 
-        card_info = self.create_login_card(bg)
+        card_info = self.create_card(bg)
         content = card_info["content"]
         card_redraw = card_info["redraw"]
 

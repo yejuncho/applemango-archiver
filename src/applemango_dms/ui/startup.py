@@ -16,12 +16,12 @@ def show_startup_screen(app):
     app._center_window(420, 560)
     app.root.title("애플망고 DMS")
     app.clear_screen()
-    app.root.configure(bg="#f9d877")
+    app.root.configure(bg="#faf9f6")
 
-    shell = tk.Frame(app.root, bg="#f9d877")
+    shell = tk.Frame(app.root, bg="#faf9f6")
     shell.pack(fill="both", expand=True)
 
-    logo_label = tk.Label(shell, bg="#f9d877")
+    logo_label = tk.Label(shell, bg="#faf9f6")
     logo_label.place(relx=0.5, rely=0.45, anchor="center")
 
     logo_photo = app._load_startup_logo_photo(max_width=300, max_height=180)

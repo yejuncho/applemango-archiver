@@ -8,7 +8,6 @@ import applemango_dms.state as state
 from applemango_dms.services.nas import discover_server_shares
 from applemango_dms.ui.widgets import WorkspaceStack
 
-
 def show_workspace_selection_screen(app):
     app._stop_login_connectivity_polling()
     if state.active_workspace_drive and app.workspace_drive_mapped_by_app:
@@ -20,18 +19,17 @@ def show_workspace_selection_screen(app):
     app._center_window(760, 680)
     app.root.title("애플망고 DMS - 워크스페이스 선택")
     app.clear_screen()
-    app.root.configure(bg="#f8f8ff")
-    app.root.configure(bg="#fff8ed")
+    app.root.configure(bg="#ffffff")
 
     if state.is_demo_mode:
         shares = app._load_demo_workspace_names()
     else:
         shares = discover_server_shares(config.default_server_name)
 
-    bg = tk.Canvas(app.root, bg="#f8f8ff", highlightthickness=0, bd=0)
+    bg = tk.Canvas(app.root, bg="#ffffff", highlightthickness=0, bd=0)
     bg.pack(fill="both", expand=True)
 
-    main_card = app.create_login_card(
+    main_card = app.create_card(
         bg,
         width=702,
         height=596,
@@ -42,7 +40,6 @@ def show_workspace_selection_screen(app):
     redraw = main_card["redraw"]
 
     def on_bg_resize(event):
-        app._draw_login_gradient(event.width, event.height)
         redraw(event.width // 2, event.height // 2)
 
     bg.bind("<Configure>", on_bg_resize)
@@ -130,7 +127,7 @@ def show_workspace_selection_screen(app):
             shares,
             on_open=enter_workspace,
             bg="#ffffff",
-            card_bg="#f8f9ff",
+            card_bg="#ffffff",
             meta_icon_photos={
                 "clock": app.ui_icon_photos.get("workspace_clock"),
                 "database": app.ui_icon_photos.get("workspace_database"),
