@@ -11,18 +11,17 @@ from applemango_dms.services.auth import (
     clear_session_login,
 )
 
-
 def show_startup_screen(app):
     app._stop_login_connectivity_polling()
     app._center_window(420, 560)
     app.root.title("애플망고 DMS")
     app.clear_screen()
-    app.root.configure(bg="white")
+    app.root.configure(bg="#f9d877")
 
-    shell = tk.Frame(app.root, bg="white")
+    shell = tk.Frame(app.root, bg="#f9d877")
     shell.pack(fill="both", expand=True)
 
-    logo_label = tk.Label(shell, bg="white")
+    logo_label = tk.Label(shell, bg="#f9d877")
     logo_label.place(relx=0.5, rely=0.45, anchor="center")
 
     logo_photo = app._load_startup_logo_photo(max_width=300, max_height=180)
@@ -33,7 +32,6 @@ def show_startup_screen(app):
         logo_label.configure(text="HISCOM", font=app._font(30, "bold"), fg="#1d2138")
 
     app.root.after(1200, app.route_from_startup)
-
 
 def route_from_startup(app):
     state.is_demo_mode = False

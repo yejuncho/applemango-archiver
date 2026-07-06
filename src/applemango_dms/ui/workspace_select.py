@@ -21,6 +21,7 @@ def show_workspace_selection_screen(app):
     app.root.title("애플망고 DMS - 워크스페이스 선택")
     app.clear_screen()
     app.root.configure(bg="#f8f8ff")
+    app.root.configure(bg="#fff8ed")
 
     if state.is_demo_mode:
         shares = app._load_demo_workspace_names()

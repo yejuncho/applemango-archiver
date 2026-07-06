@@ -17,18 +17,43 @@ class ArchiveDatabase:
                 """
                 CREATE TABLE IF NOT EXISTS files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    -- workspace / ownership
                     workspace TEXT NOT NULL,
+                    uploaded_by TEXT,
+
+                    -- file names
                     original_filename TEXT NOT NULL,
                     archived_filename TEXT NOT NULL,
-                    full_path TEXT NOT NULL,
+                    display_title TEXT,
+
+                    -- paths
+                    full_path TEXT NOT NULL UNIQUE,
+                    source_path TEXT,
+
+                    -- document meaning
                     document_type TEXT,
-                    tags TEXT,
-                    uploaded_by TEXT,
-                    archive_date TEXT,
-                    archived_at TEXT,
+                    document_date TEXT,
+                    description TEXT,
+                    notes TEXT,
+
+                    -- file technical metadata
                     file_ext TEXT,
+                    mime_type TEXT,
                     file_size INTEGER,
-                    source_path TEXT
+                    checksum TEXT,
+
+                    -- lifecycle
+                    archive_date TEXT,
+                    archived_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    modified_at TEXT,
+                    last_accessed_at TEXT,
+
+                    -- status
+                    status TEXT DEFAULT 'active',
+                    is_favorite INTEGER DEFAULT 0,
+                    is_deleted INTEGER DEFAULT 0,
+                    deleted_at TEXT
                 )
                 """
             )
@@ -60,7 +85,7 @@ class ArchiveDatabase:
                     document_type, tags, uploaded_by, archive_date, archived_at,
                     file_ext, file_size, source_path
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
                 (
                     record.get('workspace', ''),
                     record.get('original_filename', ''),

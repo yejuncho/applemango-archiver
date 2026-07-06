@@ -18,7 +18,6 @@ from applemango_dms.services.nas import (
     check_local_network_connectivity,
 )
 
-
 def show_login_screen(app, prefill_username=None):
     app._stop_login_connectivity_polling()
     state.is_demo_mode = False
@@ -65,10 +64,10 @@ def show_login_screen(app, prefill_username=None):
                 parent,
                 text=text,
                 variable=variable,
-                bg="#f9f8ff",
-                activebackground="#f9f8ff",
+                bg="#767676",
+                activebackground="#767676",
                 fg="#3f4563",
-                selectcolor="#f9f8ff",
+                selectcolor="#767676",
                 font=app._font(font_size),
                 relief="flat",
                 bd=0,
@@ -245,10 +244,8 @@ def show_login_screen(app, prefill_username=None):
 
     app.root.after(30, username_field["focus"])
 
-
 def show_username_login_screen(app):
     app.show_login_screen()
-
 
 def show_password_login_screen(app, username):
     app.show_login_screen(prefill_username=username)
