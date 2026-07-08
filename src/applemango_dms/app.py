@@ -756,7 +756,7 @@ class SequenceArchiverApp:
         sidebar_shell = tk.Canvas(body, bg="#ffffff", width=225, highlightthickness=0, bd=0)
         sidebar_shell.pack(side="left", fill="y", padx=(12, 0), pady=(10, 12))
 
-        sidebar = tk.Frame(sidebar_shell, bg="#edf2fb")
+        sidebar = tk.Frame(sidebar_shell, bg="#ffffff")
         sidebar_window_id = sidebar_shell.create_window(0, 0, window=sidebar, anchor="nw")
 
         def redraw_sidebar(_event=None):
@@ -770,8 +770,8 @@ class SequenceArchiverApp:
                 width - 1,
                 height - 1,
                 24,
-                fill="#edf2fb",
-                outline="#d9deea",
+                fill="#ffffff",
+                outline="#dfe5ee",
                 width=1,
                 tags="sidepanel",
             )

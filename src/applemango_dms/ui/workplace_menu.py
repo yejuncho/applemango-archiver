@@ -74,9 +74,9 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     nav_section = tk.Frame(parent, bg=parent.cget("bg"))
     nav_section.pack(fill="both", expand=True)
 
-    card_pad_x = 6
+    card_pad_x = 1
     card_height = 100
-    card_gap_y = 6
+    card_gap_y = card_pad_x
 
     nav_section.grid_columnconfigure(0, weight=1)
     nav_section.grid_rowconfigure(1, weight=1)
@@ -87,7 +87,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     def build_row(key, icon, title, desc, command, icon_fg, active_bg, is_last):
         is_active = key == active_key
         base_bg = parent.cget("bg")
-        hover_bg = "#f2f5fb"
+        hover_bg = "#ece9ff"
         card_bg = active_bg if is_active else "#fdfefe"
 
         outer = tk.Frame(nav_top, bg=base_bg)
@@ -111,19 +111,19 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             nonlocal is_active
             if mode == "active":
                 bg_color = active_bg
-                border = "#d0d7e6"
-                icon_color = icon_fg
-                title_color = "#2b3348"
-                desc_color = "#000000"
+                border = active_bg
+                icon_color = "#ffffff"
+                title_color = "#ffffff"
+                desc_color = "#f3f2ff"
             elif mode == "hover":
                 bg_color = hover_bg
-                border = "#d5dbe9"
+                border = "#ffffff"
                 icon_color = icon_fg
                 title_color = "#2b3348"
                 desc_color = "#000000"
             else:
                 bg_color = card_bg
-                border = "#d9deea"
+                border = "#ffffff"
                 icon_color = icon_fg
                 title_color = "#2d3448"
                 desc_color = "#000000"
@@ -152,9 +152,9 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
         card.bind("<Configure>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
         card.bind("<Button-1>", activate, add="+")
         outer.bind("<Button-1>", activate, add="+")
-        card.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+        card.bind("<Enter>", lambda _event: apply_style("hover"), add="+")
         card.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
-        outer.bind("<Enter>", lambda _event: apply_style("hover") if not is_active else apply_style("active"), add="+")
+        outer.bind("<Enter>", lambda _event: apply_style("hover"), add="+")
         outer.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
 
         rows.append(card)
@@ -170,7 +170,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             desc,
             command,
             icon_fg,
-            active_bg="#ffffff",
+            active_bg="#8a82eb",
             is_last=(idx == total - 1),
         )
 
