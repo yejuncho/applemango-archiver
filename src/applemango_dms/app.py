@@ -99,7 +99,7 @@ from applemango_dms.ui.settings import (
 )
 
 from applemango_dms.ui.header_controls import (
-    build_window_controls,
+    build_header_controls,
 )
 
 from applemango_dms.utils.windows import (
@@ -477,6 +477,9 @@ class SequenceArchiverApp:
     def _load_ui_icon_photos(self):
         icon_specs = {
             "workspace_settings": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "settings.svg", 22, 22, "#111111"),
+            "header_settings": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "settings.svg", 22, 22, "#111111"),
+            "header_logout": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "logout.svg", 22, 22, "#111111"),
+            "header_home": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "home.svg", 22, 22, "#111111"),
             "workspace_selection_folder": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "folder.svg", 24, 24, "#6ea7ff"),
             "workspace_clock": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "clock.svg", 16, 16, "#111111"),
             "workspace_database": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "database.svg", 16, 16, "#111111"),
@@ -699,6 +702,10 @@ class SequenceArchiverApp:
         clear_saved_credentials()
         self.show_login_screen()
 
+    def leave_workspace_to_selection(self):
+        self.clear_workspace(unmap_if_needed=True)
+        self.show_workspace_selection_screen()
+
     def show_startup_screen(self):
         return ui_show_startup_screen(self)
 
@@ -808,7 +815,7 @@ class SequenceArchiverApp:
 
         right = tk.Frame(header, bg="#ffffff", padx=20, pady=14)
         right.pack(side="right", anchor="ne")
-        controls = build_window_controls(self, right, bg="#ffffff")
+        controls = build_header_controls(self, right, context="workspace", bg="#ffffff")
         controls.pack(anchor="e")
 
         body = tk.Frame(shell, bg="#ffffff")

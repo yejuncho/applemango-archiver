@@ -7,7 +7,7 @@ import applemango_dms.state as state
 
 from applemango_dms.services.nas import discover_server_shares
 from applemango_dms.ui.widgets import WorkspaceStack
-from applemango_dms.ui.header_controls import build_window_controls
+from applemango_dms.ui.header_controls import build_header_controls
 
 def show_workspace_selection_screen(app):
     app._stop_login_connectivity_polling()
@@ -78,7 +78,7 @@ def show_workspace_selection_screen(app):
 
     button_row = tk.Frame(right_header, bg="#ffffff")
     button_row.pack(anchor="e")
-    controls = build_window_controls(app, button_row, bg="#ffffff")
+    controls = build_header_controls(app, button_row, context="workspace_selection", bg="#ffffff")
     controls.pack(side="left")
 
     list_shell = tk.Canvas(container, bg="#ffffff", highlightthickness=0, bd=0)

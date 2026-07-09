@@ -1,7 +1,7 @@
 import tkinter as tk
 
 
-def build_window_controls(app, parent, bg="#ffffff"):
+def build_header_controls(app, parent, context, bg="#ffffff"):
     container = tk.Frame(parent, bg=bg, bd=0, highlightthickness=0)
 
     def make_icon_button(
@@ -56,6 +56,42 @@ def build_window_controls(app, parent, bg="#ffffff"):
         set_state(bg, use_hover_icon=False)
         return wrapper
 
+    make_icon_button(
+        "header_settings",
+        "S",
+        app.show_settings_screen,
+        hover_bg="#eef2fb",
+        fg="#111111",
+    ).pack(side="left", padx=(4, 0))
+
+    if context == "workspace_selection":
+        make_icon_button(
+            "header_logout",
+            "L",
+            app.logout_and_return_to_login,
+            hover_bg="#eef2fb",
+            fg="#111111",
+        ).pack(side="left", padx=(4, 0))
+    elif context == "workspace":
+        make_icon_button(
+            "header_home",
+            "H",
+            app.leave_workspace_to_selection,
+            hover_bg="#eef2fb",
+            fg="#111111",
+        ).pack(side="left", padx=(4, 0))
+
+    window_cluster = tk.Frame(container, bg=bg, bd=0, highlightthickness=0)
+
+    divider_label = tk.Label(
+        window_cluster,
+        text="|",
+        bg=bg,
+        fg="#111111",
+        font=app._font(9, "bold"),
+    )
+    divider_label.pack(side="left", padx=(6, 8))
+
     minimize_btn = make_icon_button(
         "window_minimize",
         "_",
@@ -63,7 +99,7 @@ def build_window_controls(app, parent, bg="#ffffff"):
         hover_bg="#eef2fb",
         fg="#111111",
     )
-    minimize_btn.pack(side="left", padx=(4, 0))
+    minimize_btn.pack(in_=window_cluster, side="left", padx=(4, 0))
 
     fullscreen_btn = make_icon_button(
         "window_fullscreen_exit" if app.is_fullscreen() else "window_fullscreen_enter",
@@ -72,7 +108,7 @@ def build_window_controls(app, parent, bg="#ffffff"):
         hover_bg="#eef2fb",
         fg="#111111",
     )
-    fullscreen_btn.pack(side="left", padx=(4, 0))
+    fullscreen_btn.pack(in_=window_cluster, side="left", padx=(4, 0))
 
     close_btn = make_icon_button(
         "window_close",
@@ -82,7 +118,7 @@ def build_window_controls(app, parent, bg="#ffffff"):
         fg="#111111",
         hover_icon_key="window_close_hover",
     )
-    close_btn.pack(side="left", padx=(4, 0))
+    close_btn.pack(in_=window_cluster, side="left", padx=(4, 0))
 
     def refresh_controls():
         key = "window_fullscreen_exit" if app.is_fullscreen() else "window_fullscreen_enter"
@@ -93,7 +129,18 @@ def build_window_controls(app, parent, bg="#ffffff"):
         else:
             label.configure(image="", text=("[]" if app.is_fullscreen() else "<>"), fg=fullscreen_btn._fg)
 
+        if app.is_fullscreen():
+            if not window_cluster.winfo_manager():
+                window_cluster.pack(side="left")
+        else:
+            if window_cluster.winfo_manager():
+                window_cluster.pack_forget()
+
     app.register_window_controls_refresher(refresh_controls)
     refresh_controls()
 
     return container
+
+
+def build_window_controls(app, parent, bg="#ffffff"):
+    return build_header_controls(app, parent, context="workspace", bg=bg)
