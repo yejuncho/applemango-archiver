@@ -183,6 +183,8 @@ def show_search_files_screen(app):
             messagebox.showerror("파일 검색", str(exc), parent=app.root)
             return
 
+        app.db.audit_missing_files(state.active_workspace)
+
         rows = app.db.search_files(
             workspace=state.active_workspace,
             date_prefix=date_prefix,
@@ -191,19 +193,12 @@ def show_search_files_screen(app):
             free_text=free_var.get().strip(),
         )
 
-        stale_paths = []
         for idx, row in enumerate(rows):
             archive_date, document_type, tags, archived_filename, uploaded_by, file_size, full_path = row
-            if not Path(full_path).exists():
-                stale_paths.append(full_path)
-                continue
             size_text = f"{int(file_size):,}" if isinstance(file_size, int) else str(file_size or "")
             table.insert("", "end", iid=f"r{idx}",
                          values=(archive_date, document_type, tags, archived_filename,
                                  uploaded_by, size_text, full_path))
-
-        if stale_paths:
-            app.db.delete_file_records_by_paths(state.active_workspace, stale_paths)
         _update_action_buttons()
 
     def clear_filters_only():
@@ -258,12 +253,14 @@ def show_search_files_screen(app):
         for target in paths:
             path = Path(target)
             try:
-                path.unlink(missing_ok=True)
+                path.unlink()
                 deleted_paths.append(str(path))
+            except FileNotFoundError:
+                errors.append(f"{path.name}: 파일이 이미 존재하지 않습니다.")
             except OSError as exc:
                 errors.append(f"{path.name}: {exc}")
         if deleted_paths:
-            app.db.delete_file_records_by_paths(state.active_workspace, deleted_paths)
+            app.db.mark_files_deleted_by_paths(state.active_workspace, deleted_paths)
         if errors:
             messagebox.showerror("파일 삭제", "일부 파일 삭제에 실패했습니다:\n\n" + "\n".join(errors), parent=app.root)
         run_search()

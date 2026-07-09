@@ -3,6 +3,10 @@ from pathlib import Path
 from applemango_dms.config import DEFAULT_DOCUMENT_TYPES
 
 class ArchiveDatabase:
+    STATUS_ACTIVE = 'active'
+    STATUS_DELETED = 'deleted'
+    STATUS_MISSING = 'missing'
+
     def __init__(self, db_path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,12 +173,61 @@ class ArchiveDatabase:
             )
             conn.commit()
 
-    def search_files(self, workspace, date_prefix=None, document_type='전체', tags='', free_text=''):
+    def _normalize_statuses(self, statuses):
+        if statuses is None:
+            return [self.STATUS_ACTIVE]
+
+        normalized = []
+        for value in statuses:
+            token = str(value or '').strip().lower()
+            if token:
+                normalized.append(token)
+        return normalized or [self.STATUS_ACTIVE]
+
+    def audit_missing_files(self, workspace):
+        workspace_name = str(workspace or '').strip()
+        if not workspace_name:
+            return 0
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                'SELECT id, full_path FROM files WHERE workspace = ? AND status = ?',
+                (workspace_name, self.STATUS_ACTIVE),
+            ).fetchall()
+
+            missing_ids = []
+            for row_id, full_path in rows:
+                try:
+                    exists = Path(str(full_path or '')).exists()
+                except Exception:
+                    exists = False
+                if not exists:
+                    missing_ids.append(int(row_id))
+
+            if not missing_ids:
+                return 0
+
+            placeholders = ','.join('?' for _ in missing_ids)
+            conn.execute(
+                f'UPDATE files SET status = ? WHERE id IN ({placeholders})',
+                [self.STATUS_MISSING] + missing_ids,
+            )
+            conn.commit()
+            return len(missing_ids)
+
+    def search_files(self, workspace, date_prefix=None, document_type='전체', tags='', free_text='', statuses=None):
+        self.audit_missing_files(workspace)
+
+        normalized_statuses = self._normalize_statuses(statuses)
         query = (
             'SELECT archive_date, document_type, tags, archived_filename, uploaded_by, file_size, full_path '
             'FROM files WHERE workspace = ?'
         )
         params = [workspace]
+
+        status_placeholders = ','.join('?' for _ in normalized_statuses)
+        query += f' AND status IN ({status_placeholders})'
+        params.extend(normalized_statuses)
 
         if date_prefix:
             query += ' AND archive_date LIKE ?'
@@ -204,8 +257,12 @@ class ArchiveDatabase:
             return conn.execute(query, params).fetchall()
 
     def count_files_by_workspace(self, workspace):
+        self.audit_missing_files(workspace)
         with self._connect() as conn:
-            row = conn.execute('SELECT COUNT(*) FROM files WHERE workspace = ?', (workspace,)).fetchone()
+            row = conn.execute(
+                'SELECT COUNT(*) FROM files WHERE workspace = ? AND status = ?',
+                (workspace, self.STATUS_ACTIVE),
+            ).fetchone()
         return int(row[0] if row and row[0] is not None else 0)
 
     def get_archived_filenames(self, workspace):
@@ -216,15 +273,27 @@ class ArchiveDatabase:
             ).fetchall()
         return {row[0] for row in rows if row and row[0]}
 
-    def delete_file_records_by_paths(self, workspace, full_paths):
+    def mark_files_deleted_by_paths(self, workspace, full_paths):
         targets = [str(path) for path in full_paths if str(path).strip()]
         if not targets:
-            return
+            return 0
 
         with self._connect() as conn:
             placeholders = ','.join('?' for _ in targets)
-            conn.execute(
-                f'DELETE FROM files WHERE workspace = ? AND full_path IN ({placeholders})',
-                [workspace] + targets,
+            cursor = conn.execute(
+                f'''
+                UPDATE files
+                SET
+                    status = ?,
+                    is_deleted = 1,
+                    deleted_at = CURRENT_TIMESTAMP
+                WHERE workspace = ? AND full_path IN ({placeholders})
+                ''',
+                [self.STATUS_DELETED, workspace] + targets,
             )
             conn.commit()
+            return int(cursor.rowcount or 0)
+
+    def delete_file_records_by_paths(self, workspace, full_paths):
+        # Backward-compatible alias. Records are now soft-deleted instead of removed.
+        return self.mark_files_deleted_by_paths(workspace, full_paths)

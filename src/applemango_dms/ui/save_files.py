@@ -236,9 +236,7 @@ def show_save_files_screen(app):
             row_state["progress_ratio"] = max(0.0, min(1.0, float(progress_ratio)))
 
     def get_upload_targets():
-        if selected_row_keys:
-            return [path for path in selected_files if path in selected_row_keys]
-        return list(selected_files)
+        return [path for path in selected_files if path in selected_row_keys]
 
     def start_upload_placeholder():
         targets = get_upload_targets()
@@ -320,7 +318,7 @@ def show_save_files_screen(app):
                         "document_date": selected_document_date,
                         "tags": tags,
                         "uploaded_by": state.session_account_name or state.session_username or "",
-                        "archive_date": selected_document_date,
+                        "archive_date": datetime.now().strftime("%Y-%m-%d"),
                         "archived_at": datetime.now().isoformat(timespec="seconds"),
                         "file_ext": source.suffix,
                         "file_size": destination_path.stat().st_size if destination_path.exists() else 0,
@@ -350,21 +348,30 @@ def show_save_files_screen(app):
         text_offset_x=0,
     ):
         # Apply a global size bump so all rounded action buttons look consistently larger.
+        base_fill = fill
+        base_outline = outline
         render_width = width + 10
         render_height = height + 6
         button_canvas = tk.Canvas(parent, width=render_width, height=render_height, bg=parent.cget("bg"), highlightthickness=0, bd=0, cursor="hand2")
+        button_canvas.override_fill = None
+        button_canvas.override_outline = None
         if icon_photo is not None:
             # Keep a strong reference on the widget to prevent Tk image GC.
             button_canvas.icon_photo_ref = icon_photo
 
         def draw(mode="normal"):
             button_canvas.delete("all")
-            fill_color = fill
-            outline_color = outline
-            if mode == "hover" and fill == "#ffffff":
+            fill_color = base_fill
+            outline_color = base_outline
+            if mode == "hover" and base_fill == "#ffffff":
                 fill_color = "#f6f8fc"
-            elif mode == "hover" and fill != "#ffffff":
+            elif mode == "hover" and base_fill != "#ffffff":
                 fill_color = "#245bc0"
+            else:
+                if button_canvas.override_fill is not None:
+                    fill_color = button_canvas.override_fill
+                if button_canvas.override_outline is not None:
+                    outline_color = button_canvas.override_outline
 
             app._smooth_rounded_rect(
                 button_canvas,
@@ -391,6 +398,14 @@ def show_save_files_screen(app):
                 button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="w")
             else:
                 button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="center")
+
+            def set_button_overrides(*, fill_override=None, outline_override=None):
+                button_canvas.override_fill = fill_override
+                button_canvas.override_outline = outline_override
+                draw("normal")
+
+            button_canvas.set_button_overrides = set_button_overrides
+            button_canvas.draw_state = draw
 
         button_canvas.bind("<Button-1>", lambda _event: command())
         button_canvas.bind("<Enter>", lambda _event: draw("hover"))
@@ -570,7 +585,6 @@ def show_save_files_screen(app):
     title_label.pack(side="left")
 
     center_actions = tk.Frame(row1_frame, bg=row_colors[0])
-    center_actions.pack(side="left", padx=(10, 10))
 
     remove_btn = create_rounded_action(
         center_actions,
@@ -582,7 +596,6 @@ def show_save_files_screen(app):
         outline="#d9deea",
         text_color="#2d3448",
     )
-    remove_btn.pack(side="left")
 
     clear_btn = create_rounded_action(
         center_actions,
@@ -594,7 +607,6 @@ def show_save_files_screen(app):
         outline="#d9deea",
         text_color="#2d3448",
     )
-    clear_btn.pack(side="left", padx=(8, 0))
 
     upload_icon = load_svg_photo(
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "upload.svg",
@@ -606,20 +618,81 @@ def show_save_files_screen(app):
         row1_frame,
         "업로드 시작",
         start_upload_placeholder,
-        width=115,
+        width=100,
         height=30,
         fill="#5555d5",
         outline="#5555d5",
         text_color="#ffffff",
         icon_photo=upload_icon,
         icon_fallback_text="⬆",
-        icon_offset_x=-3,
+        icon_offset_x=-4,
         text_offset_x=-3,
     )
-    upload_btn.pack(side="right")
 
-    # Row-2 / Row-3 shared column widths (percent). Col-3 removed; col-2 absorbs its width.
-    table_col_widths_pct = [2.5, 32.5, 12.5, 12.5, 12.5, 7.5, 7.5, 10, 2.5]
+    upload_glow_state = {
+        "job": None,
+        "phase": 0,
+    }
+
+    def stop_upload_button_glow():
+        job = upload_glow_state.get("job")
+        if job is not None:
+            try:
+                app.root.after_cancel(job)
+            except Exception:
+                pass
+            upload_glow_state["job"] = None
+        upload_btn.set_button_overrides(fill_override=None, outline_override=None)
+
+    def animate_upload_button_glow():
+        upload_glow_state["job"] = None
+        has_selected_files = bool(selected_files) and any(path in selected_row_keys for path in selected_files)
+        if not has_selected_files:
+            stop_upload_button_glow()
+            return
+
+        glow_frames = [
+            ("#5555d5", "#5555d5"),
+            ("#5e64e6", "#7d86ff"),
+            ("#6973ff", "#9aa7ff"),
+            ("#5e64e6", "#7d86ff"),
+        ]
+        frame_index = upload_glow_state["phase"]
+        glow_fill, glow_outline = glow_frames[frame_index]
+        upload_btn.set_button_overrides(fill_override=glow_fill, outline_override=glow_outline)
+        upload_glow_state["phase"] = (frame_index + 1) % len(glow_frames)
+        upload_glow_state["job"] = app.root.after(260, animate_upload_button_glow)
+
+    def ensure_upload_button_glow_running():
+        if upload_glow_state.get("job") is None:
+            animate_upload_button_glow()
+
+    def update_action_buttons_visibility():
+        has_files = bool(selected_files)
+        has_selected_files = has_files and any(path in selected_row_keys for path in selected_files)
+
+        remove_btn.pack_forget()
+        clear_btn.pack_forget()
+        upload_btn.pack_forget()
+        center_actions.pack_forget()
+        stop_upload_button_glow()
+
+        if not has_files:
+            return
+
+        center_actions.pack(side="left", padx=(10, 10))
+        if has_selected_files:
+            remove_btn.pack(side="left")
+            clear_btn.pack(side="left", padx=(8, 0))
+            upload_btn.pack(side="right")
+            ensure_upload_button_glow_running()
+        else:
+            clear_btn.pack(side="left")
+
+    update_action_buttons_visibility()
+
+    # Row-2 / Row-3 shared column widths (percent). Last delete column removed; progress column absorbs its width.
+    table_col_widths_pct = [2.5, 32.5, 12.5, 12.5, 12.5, 7.5, 7.5, 12.5]
     row2_headers = [
         "",
         "원본 파일명",
@@ -629,7 +702,6 @@ def show_save_files_screen(app):
         "크기",
         "상태",
         "진행률",
-        "",
     ]
 
     row2_top = inner_y1 + row_heights[0]
@@ -669,15 +741,9 @@ def show_save_files_screen(app):
         max_width=14,
         max_height=14,
     )
-    cancel_icon = load_svg_photo(
-        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "cancel.svg",
-        max_width=12,
-        max_height=12,
-    )
     left_detail_card.unchecked_icon_ref = unchecked_icon
     left_detail_card.checked_icon_ref = checked_icon
     left_detail_card.checked_white_icon_ref = checked_white_icon
-    left_detail_card.cancel_icon_ref = cancel_icon
 
     file_icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "file_formats"
     file_format_icons = {
@@ -762,7 +828,7 @@ def show_save_files_screen(app):
     left_detail_card.tag_bind("row2_select_toggle", "<Button-1>", toggle_row2_select_all)
 
     for idx, header_text in enumerate(row2_headers):
-        if idx in (0, 8) or not header_text:
+        if idx == 0 or not header_text:
             continue
         left_detail_card.create_text(
             col_centers[idx],
@@ -1292,7 +1358,10 @@ def show_save_files_screen(app):
         if active_card is None or not active_card.winfo_exists():
             return
 
-        clicked_widget = app.root.winfo_containing(event.x_root, event.y_root)
+        try:
+            clicked_widget = app.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return
         if clicked_widget is None:
             return
 
@@ -1977,8 +2046,6 @@ def show_save_files_screen(app):
             doc_col_width = col_width_px[3]
             tags_col_left = col_starts[4] - row2_inner_x1
             tags_col_width = col_width_px[4]
-            cancel_col_left = col_starts[8] - row2_inner_x1
-            cancel_col_width = col_width_px[8]
 
             def on_row_canvas_click(
                 event,
@@ -1989,20 +2056,15 @@ def show_save_files_screen(app):
                 doc_width=doc_col_width,
                 tags_left=tags_col_left,
                 tags_width=tags_col_width,
-                cancel_left=cancel_col_left,
-                cancel_width=cancel_col_width,
             ):
                 date_right = date_left + date_width
                 doc_right = doc_left + doc_width
                 tags_right = tags_left + tags_width
-                cancel_right = cancel_left + cancel_width
                 if date_left <= event.x <= date_right:
                     return None
                 if doc_left <= event.x <= doc_right:
                     return None
                 if tags_left <= event.x <= tags_right:
-                    return None
-                if cancel_left <= event.x <= cancel_right:
                     return None
                 return select_row_item(key, event)
 
@@ -2159,7 +2221,8 @@ def show_save_files_screen(app):
             bar_x1 = progress_col_left + 4
             base_bar_x2 = progress_col_left + max(16, progress_col_width - progress_text_w - 4)
             bar_extension = int((base_bar_x2 - bar_x1) * 0.2)
-            bar_x2 = min(progress_col_left + progress_col_width - progress_text_w, base_bar_x2 + bar_extension)
+            bar_full_x2 = min(progress_col_left + progress_col_width - progress_text_w, base_bar_x2 + bar_extension)
+            bar_x2 = bar_x1 + max(12, int((bar_full_x2 - bar_x1) * 0.9))
             bar_y1 = (table_row_height // 2) - 4
             bar_y2 = (table_row_height // 2) + 4
             bar_radius = max(2, (bar_y2 - bar_y1) // 2)
@@ -2200,29 +2263,8 @@ def show_save_files_screen(app):
                 anchor="e",
             )
 
-            def on_cancel_click(_event, key=row_key):
-                remove_row_item(key)
-                return "break"
-
-            if cancel_icon is not None:
-                row_canvas.create_image(local_col_centers[8], table_row_height // 2, image=cancel_icon, anchor="center", tags=("row_cancel",))
-            else:
-                row_canvas.create_text(local_col_centers[8], table_row_height // 2, text="✕", fill="#8f96ad", font=app._font(10, "bold"), anchor="center", tags=("row_cancel",))
-
-            row_canvas.create_rectangle(
-                cancel_col_left,
-                0,
-                cancel_col_left + cancel_col_width,
-                table_row_height,
-                fill="",
-                outline="",
-                tags=("row_cancel",),
-            )
-            row_canvas.tag_bind("row_cancel", "<Button-1>", on_cancel_click)
-            row_canvas.tag_bind("row_cancel", "<Enter>", lambda _event, canvas=row_canvas: canvas.configure(cursor="hand2"))
-            row_canvas.tag_bind("row_cancel", "<Leave>", lambda _event, canvas=row_canvas: canvas.configure(cursor=""))
-
         update_row2_select_icon()
+        update_action_buttons_visibility()
         draw_row4_summary()
         draw_right_card()
 
