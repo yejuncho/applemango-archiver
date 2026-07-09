@@ -7,6 +7,7 @@ import applemango_dms.state as state
 
 from applemango_dms.services.nas import discover_server_shares
 from applemango_dms.ui.widgets import WorkspaceStack
+from applemango_dms.ui.header_controls import build_window_controls
 
 def show_workspace_selection_screen(app):
     app._stop_login_connectivity_polling()
@@ -77,18 +78,8 @@ def show_workspace_selection_screen(app):
 
     button_row = tk.Frame(right_header, bg="#ffffff")
     button_row.pack(anchor="e")
-
-    app._create_icon_button(button_row, "workspace_settings", "\u2699", app.show_settings_screen, bg="#ffffff", hover_bg="#eef1fa", fg="#111111", padding=(7, 7)).pack(side="left", padx=(4, 0))
-    app._create_icon_button(
-        button_row,
-        "workspace_back",
-        "\u21aa",
-        lambda: app.show_login_screen(prefill_username=state.session_username or state.session_account_name or None),
-        bg="#ffffff",
-        hover_bg="#eef1fa",
-        fg="#111111",
-        padding=(7, 7),
-    ).pack(side="left", padx=(4, 0))
+    controls = build_window_controls(app, button_row, bg="#ffffff")
+    controls.pack(side="left")
 
     list_shell = tk.Canvas(container, bg="#ffffff", highlightthickness=0, bd=0)
     list_shell.pack(fill="both", expand=True)

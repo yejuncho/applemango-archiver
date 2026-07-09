@@ -1,7 +1,6 @@
 import time
 import tkinter as tk
 
-
 class WorkspaceCard(tk.Canvas):
     def __init__(self, parent, workspace_name, on_select=None, on_open=None, surface_bg="#f9f8ff", meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
         self._card_height = 216

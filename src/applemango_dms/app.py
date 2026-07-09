@@ -98,6 +98,10 @@ from applemango_dms.ui.settings import (
     show_change_server_name_dialog as ui_show_change_server_name_dialog,
 )
 
+from applemango_dms.ui.header_controls import (
+    build_window_controls,
+)
+
 from applemango_dms.utils.windows import (
     apply_window_icon,
 )
@@ -110,12 +114,14 @@ class SequenceArchiverApp:
     def __init__(self):
         self.root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
         self._force_fullscreen = True
+        self._window_controls_refreshers = []
         apply_window_icon(self.root)
         self.ui_font_family = self._initialize_ui_font_family()
         self.root.geometry("640x500")
         self.root.configure(bg="white")
         self.root.resizable(True, True)
         self._apply_fullscreen_mode()
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_application)
 
         self.db = None
         self.filename_builder = FilenameBuilder()
@@ -251,14 +257,84 @@ class SequenceArchiverApp:
             return
         self.root.geometry(f"{w}x{h}")
 
-    def _apply_fullscreen_mode(self):
+    def register_window_controls_refresher(self, callback):
+        if callable(callback):
+            self._window_controls_refreshers.append(callback)
+
+    def _notify_window_controls_changed(self):
+        kept = []
+        for callback in self._window_controls_refreshers:
+            try:
+                callback()
+                kept.append(callback)
+            except Exception:
+                continue
+        self._window_controls_refreshers = kept
+
+    def is_fullscreen(self):
+        return bool(self._force_fullscreen)
+
+    def _set_fullscreen(self, enabled):
+        self._force_fullscreen = bool(enabled)
         try:
-            self.root.attributes("-fullscreen", True)
+            self.root.attributes("-fullscreen", self._force_fullscreen)
         except Exception:
             try:
-                self.root.state("zoomed")
+                self.root.state("zoomed" if self._force_fullscreen else "normal")
             except Exception:
                 pass
+
+        if not self._force_fullscreen:
+            self._center_window(1372, 900)
+
+        self._notify_window_controls_changed()
+
+    def toggle_fullscreen(self):
+        self._set_fullscreen(not self._force_fullscreen)
+
+    def _is_file_operation_active(self):
+        for flag_name in (
+            "is_file_operation_active",
+            "file_operation_active",
+            "is_uploading",
+            "upload_in_progress",
+            "save_in_progress",
+        ):
+            if bool(getattr(self, flag_name, False)):
+                return True
+        return False
+
+    def exit_application(self):
+        if self._is_file_operation_active():
+            should_exit = messagebox.askyesno(
+                "종료 확인",
+                "파일 작업이 아직 진행 중입니다. 지금 종료하면 업로드 또는 저장 작업이 중단될 수 있습니다. 종료하시겠습니까?",
+                parent=self.root,
+            )
+            if not should_exit:
+                return
+
+        try:
+            self.clear_workspace(unmap_if_needed=True)
+        except Exception:
+            pass
+
+        try:
+            clear_session_login()
+        except Exception:
+            pass
+
+        try:
+            close_method = getattr(self.db, "close", None)
+            if callable(close_method):
+                close_method()
+        except Exception:
+            pass
+
+        self.root.destroy()
+
+    def _apply_fullscreen_mode(self):
+        self._set_fullscreen(True)
 
     def clear_screen(self):
         for child in self.root.winfo_children():
@@ -401,11 +477,15 @@ class SequenceArchiverApp:
     def _load_ui_icon_photos(self):
         icon_specs = {
             "workspace_settings": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "settings.svg", 22, 22, "#111111"),
-            "workspace_back": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "back.svg", 22, 22, "#111111"),
             "workspace_selection_folder": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "folder.svg", 24, 24, "#6ea7ff"),
             "workspace_clock": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "clock.svg", 16, 16, "#111111"),
             "workspace_database": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "database.svg", 16, 16, "#111111"),
             "workspace_file_stack": (config.PROJECT_ROOT / "assets" / "icons" / "workspace_selection" / "file_stack.svg", 16, 16, "#111111"),
+            "window_minimize": (config.PROJECT_ROOT / "assets" / "icons" / "header_controls" / "minimize.svg", 22, 22, "#111111"),
+            "window_fullscreen_enter": (config.PROJECT_ROOT / "assets" / "icons" / "header_controls" / "fullscreen.svg", 22, 22, "#111111"),
+            "window_fullscreen_exit": (config.PROJECT_ROOT / "assets" / "icons" / "header_controls" / "exit_fullscreen.svg", 22, 22, "#111111"),
+            "window_close": (config.PROJECT_ROOT / "assets" / "icons" / "header_controls" / "exit_program.svg", 22, 22, None),
+            "window_close_hover": (config.PROJECT_ROOT / "assets" / "icons" / "header_controls" / "exit_program_red.svg", 22, 22, None),
             "workspace_folder": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "folder.svg", 30, 30, "#2fa44f"),
             "workspace_file_save": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_save_blue.svg", 18, 18, None),
             "workspace_file_search": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_search_green.svg", 18, 18, None),
@@ -714,7 +794,6 @@ class SequenceArchiverApp:
         left.pack(side="left", fill="x", expand=True)
 
         workspace_name = state.active_workspace or "워크스페이스"
-        welcome_name = state.session_account_name or state.session_username or "사용자"
 
         workspace_folder_icon = self.ui_icon_photos.get("workspace_folder")
         if workspace_folder_icon is not None:
@@ -729,54 +808,8 @@ class SequenceArchiverApp:
 
         right = tk.Frame(header, bg="#ffffff", padx=20, pady=14)
         right.pack(side="right", anchor="ne")
-        info_row = tk.Frame(right, bg="#ffffff")
-        info_row.pack(anchor="e")
-        tk.Label(
-            info_row,
-            text=f"서버: {config.default_server_name}",
-            font=self._font(9, "bold"),
-            fg="#111111",
-            bg="#ffffff",
-        ).pack(side="left")
-        tk.Label(
-            info_row,
-            text="|",
-            font=self._font(9, "bold"),
-            fg="#111111",
-            bg="#ffffff",
-        ).pack(side="left", padx=(10, 10))
-        tk.Label(
-            info_row,
-            text=f"사용자: {welcome_name}",
-            font=self._font(9, "bold"),
-            fg="#111111",
-            bg="#ffffff",
-        ).pack(side="left")
-        if state.is_demo_mode:
-            tk.Label(
-                info_row,
-                text="[ LOCAL DEMO MODE ]",
-                font=self._font(8, "bold"),
-                fg="#5c667f",
-                bg="#ffffff",
-            ).pack(side="left", padx=(10, 0))
-        tk.Label(
-            info_row,
-            text="|",
-            font=self._font(9, "bold"),
-            fg="#111111",
-            bg="#ffffff",
-        ).pack(side="left", padx=(10, 10))
-        self._create_icon_button(
-            info_row,
-            "workspace_back",
-            "\u21aa",
-            self.show_workspace_selection_screen,
-            bg="#ffffff",
-            hover_bg="#eef2fb",
-            fg="#111111",
-            padding=(7, 7),
-        ).pack(side="left")
+        controls = build_window_controls(self, right, bg="#ffffff")
+        controls.pack(anchor="e")
 
         body = tk.Frame(shell, bg="#ffffff")
         body.pack(fill="both", expand=True)
