@@ -24,7 +24,7 @@ class ArchiveDatabase:
 
                     -- file names
                     original_filename TEXT NOT NULL,
-                    archived_filename TEXT NOT NULL,
+                    archived_filename TEXT NOT NULL UNIQUE,
                     display_title TEXT,
 
                     -- paths
@@ -34,6 +34,7 @@ class ArchiveDatabase:
                     -- document meaning
                     document_type TEXT,
                     document_date TEXT,
+                    tags TEXT,
                     description TEXT,
                     notes TEXT,
 
@@ -68,7 +69,58 @@ class ArchiveDatabase:
                 'INSERT OR IGNORE INTO document_types(name) VALUES (?)',
                 [(item,) for item in DEFAULT_DOCUMENT_TYPES],
             )
+            self._migrate_files_table(conn)
             conn.commit()
+
+    def _migrate_files_table(self, conn):
+        required_columns = {
+            # workspace / ownership
+            'workspace': 'TEXT',
+            'uploaded_by': 'TEXT',
+
+            # file names
+            'original_filename': 'TEXT',
+            'archived_filename': 'TEXT',
+            'display_title': 'TEXT',
+
+            # paths
+            'full_path': 'TEXT',
+            'source_path': 'TEXT',
+
+            # document meaning
+            'document_type': 'TEXT',
+            'document_date': 'TEXT',
+            'tags': 'TEXT',
+            'description': 'TEXT',
+            'notes': 'TEXT',
+
+            # file technical metadata
+            'file_ext': 'TEXT',
+            'mime_type': 'TEXT',
+            'file_size': 'INTEGER',
+            'checksum': 'TEXT',
+
+            # lifecycle
+            'archive_date': 'TEXT',
+            'archived_at': 'TEXT DEFAULT CURRENT_TIMESTAMP',
+            'modified_at': 'TEXT',
+            'last_accessed_at': 'TEXT',
+
+            # status
+            'status': "TEXT DEFAULT 'active'",
+            'is_favorite': 'INTEGER DEFAULT 0',
+            'is_deleted': 'INTEGER DEFAULT 0',
+            'deleted_at': 'TEXT',
+        }
+
+        existing_columns = {
+            row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()
+        }
+
+        for column_name, column_definition in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            conn.execute(f'ALTER TABLE files ADD COLUMN {column_name} {column_definition}')
 
     def get_document_types(self):
         with self._connect() as conn:
@@ -81,24 +133,38 @@ class ArchiveDatabase:
             conn.execute(
                 """
                 INSERT INTO files (
-                    workspace, original_filename, archived_filename, full_path,
-                    document_type, tags, uploaded_by, archive_date, archived_at,
-                    file_ext, file_size, source_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
+                    workspace, uploaded_by,
+                    original_filename, archived_filename, display_title,
+                    full_path, source_path,
+                    document_type, document_date, tags, description, notes,
+                    file_ext, mime_type, file_size, checksum,
+                    archive_date, archived_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
-                    record.get('workspace', ''),
-                    record.get('original_filename', ''),
-                    record.get('archived_filename', ''),
-                    record.get('full_path', ''),
-                    record.get('document_type', ''),
-                    record.get('tags', ''),
-                    record.get('uploaded_by', ''),
-                    record.get('archive_date', ''),
-                    record.get('archived_at', ''),
-                    record.get('file_ext', ''),
-                    int(record.get('file_size', 0) or 0),
-                    record.get('source_path', ''),
+                    record.get("workspace", ""),
+                    record.get("uploaded_by", ""),
+
+                    record.get("original_filename", ""),
+                    record.get("archived_filename", ""),
+                    record.get("display_title", ""),
+
+                    record.get("full_path", ""),
+                    record.get("source_path", ""),
+
+                    record.get("document_type", ""),
+                    record.get("document_date", ""),
+                    record.get("tags", ""),
+                    record.get("description", ""),
+                    record.get("notes", ""),
+
+                    record.get("file_ext", ""),
+                    record.get("mime_type", ""),
+                    int(record.get("file_size", 0) or 0),
+                    record.get("checksum", ""),
+
+                    record.get("archive_date", ""),
+                    record.get("archived_at", ""),
                 ),
             )
             conn.commit()

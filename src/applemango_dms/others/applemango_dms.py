@@ -43,7 +43,7 @@ active_workspace = ""
 active_workspace_drive = ""
 
 credential_store_path = Path.home() / ".applemango_archiver_credentials.json"
-archive_db_path = Path.home() / ".applemango_archiver" / "archive.db"
+archive_db_path = Path.home() / ".applemango_archiver" / "applemango.db"
 logo_path = Path(__file__).resolve().parent.parent / "image" / "hiscom_logo.png"
 
 

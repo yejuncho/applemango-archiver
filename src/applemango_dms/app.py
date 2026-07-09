@@ -117,7 +117,7 @@ class SequenceArchiverApp:
         self.root.resizable(True, True)
         self._apply_fullscreen_mode()
 
-        self.db = ArchiveDatabase(config.archive_db_path)
+        self.db = None
         self.filename_builder = FilenameBuilder()
         self.workspace_manager = WorkspaceManager()
         self.workspace_drive_mapped_by_app = False
@@ -634,7 +634,35 @@ class SequenceArchiverApp:
     def show_password_login_screen(self, username):
         return ui_show_password_login_screen(self, username)
 
+    @staticmethod
+    def _get_local_archive_db_path():
+        return Path.home() / ".applemango_archiver" / "applemango.db"
+
+    def _resolve_archive_db_path(self):
+        if state.is_demo_mode:
+            return self._get_local_archive_db_path()
+        return Path(config.archive_db_path)
+
+    def ensure_database_ready(self):
+        target_path = self._resolve_archive_db_path()
+        current_path = Path(self.db.db_path) if self.db is not None else None
+        if current_path == target_path:
+            return True
+
+        try:
+            self.db = ArchiveDatabase(target_path)
+            return True
+        except Exception as exc:
+            messagebox.showerror(
+                "데이터베이스 오류",
+                f"데이터베이스 파일을 준비하지 못했습니다.\n경로: {target_path}\n오류: {exc}",
+                parent=self.root,
+            )
+            return False
+
     def show_workspace_selection_screen(self):
+        if not self.ensure_database_ready():
+            return
         return ui_show_workspace_selection_screen(self)
 
     def build_header(self, parent, title):

@@ -28,7 +28,7 @@ def show_search_files_screen(app):
     )
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 검색", "지정한 파일을 검색하고 바로 열람하세요.")
+    app._build_workspace_page_header(outer, "파일 검색", "다양한 조건으로 파일을 검색할 수 있습니다.")
 
     scroll_canvas = tk.Canvas(outer, bg="#ffffff", highlightthickness=0)
     scroll_canvas.pack(fill="both", expand=True)

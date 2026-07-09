@@ -5,7 +5,7 @@ default_drive_letter = "Z"
 allowed_mapping_letters = list("ABDEFHIJKLMNOPQRSTUVWXYZ")
 default_server_port = 445
 credential_store_path = Path.home() / ".applemango_archiver_credentials.json"
-archive_db_path = Path.home() / ".applemango_archiver" / "archive.db"
+archive_db_path = Path(fr"{default_server_name}\database\applemango.db")
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_SOURCE_DIR = PACKAGE_DIR.parent
