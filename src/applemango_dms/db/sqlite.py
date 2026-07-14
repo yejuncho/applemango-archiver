@@ -13,73 +13,260 @@ class ArchiveDatabase:
         self._init_db()
 
     def _connect(self):
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA foreign_keys = ON;')
+        return conn
 
     def _init_db(self):
         with self._connect() as conn:
             conn.execute(
                 """
-                CREATE TABLE IF NOT EXISTS files (
+                CREATE TABLE IF NOT EXISTS workspaces (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-                    -- workspace / ownership
-                    workspace TEXT NOT NULL,
-                    uploaded_by TEXT,
+                    name TEXT NOT NULL UNIQUE,
+                    share_path TEXT NOT NULL UNIQUE,
 
-                    -- file names
-                    original_filename TEXT NOT NULL,
-                    archived_filename TEXT NOT NULL UNIQUE,
-                    display_title TEXT,
+                    is_active INTEGER NOT NULL DEFAULT 1
+                        CHECK (is_active IN (0, 1)),
 
-                    -- paths
-                    full_path TEXT NOT NULL UNIQUE,
-                    source_path TEXT,
-
-                    -- document meaning
-                    document_type TEXT,
-                    document_date TEXT,
-                    tags TEXT,
-                    description TEXT,
-                    notes TEXT,
-
-                    -- file technical metadata
-                    file_ext TEXT,
-                    mime_type TEXT,
-                    file_size INTEGER,
-                    checksum TEXT,
-
-                    -- lifecycle
-                    archive_date TEXT,
-                    archived_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    modified_at TEXT,
-                    last_accessed_at TEXT,
-
-                    -- status
-                    status TEXT DEFAULT 'active',
-                    is_favorite INTEGER DEFAULT 0,
-                    is_deleted INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     deleted_at TEXT
-                )
+                );
                 """
             )
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS document_types (
-                    name TEXT PRIMARY KEY
-                )
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    workspace_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+
+                    is_active INTEGER NOT NULL DEFAULT 1
+                        CHECK (is_active IN (0, 1)),
+                    
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TEXT,
+
+                    UNIQUE (workspace_id, name),
+                    UNIQUE (workspace_id, id),
+
+                    FOREIGN KEY (workspace_id)
+                        REFERENCES workspaces(id)
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT
+                );
                 """
             )
-            conn.executemany(
-                'INSERT OR IGNORE INTO document_types(name) VALUES (?)',
-                [(item,) for item in DEFAULT_DOCUMENT_TYPES],
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    -- relationships
+                    workspace_id INTEGER NOT NULL,
+                    document_type_id INTEGER NOT NULL,
+
+                    -- ownership
+                    uploaded_by TEXT NOT NULL,
+
+                    -- file names
+                    original_filename TEXT NOT NULL,
+                    archived_filename TEXT NOT NULL,
+
+                    -- paths
+                    relative_path TEXT NOT NULL,
+
+                    -- dates
+                    document_date TEXT NOT NULL,
+                    source_created_at TEXT,
+                    source_modified_at TEXT,
+
+                    -- technical metadata
+                    file_ext TEXT NOT NULL,
+                    mime_type TEXT,
+
+                    file_size INTEGER
+                        CHECK (file_size IS NULL
+                        OR file_size >= 0),
+
+                    checksum TEXT,
+
+                    -- lifecycle
+                    archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    -- status
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK (
+                            status IN (
+                                'active',
+                                'deleted',
+                                'missing'
+                            )
+                        ),
+
+                    deleted_at TEXT,
+
+                    UNIQUE (workspace_id, archived_filename),
+                    UNIQUE (workspace_id, relative_path),
+
+                    FOREIGN KEY (workspace_id)
+                        REFERENCES workspaces(id)
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT,
+
+                    FOREIGN KEY (
+                    workspace_id,
+                    document_type_id
+                    )
+                        REFERENCES document_types(
+                        workspace_id,
+                        id
+                        )
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT
+                );
+                """
             )
-            self._migrate_files_table(conn)
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    
+                    workspace_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    UNIQUE (workspace_id, name),
+
+                    FOREIGN KEY (workspace_id)
+                        REFERENCES workspaces(id)
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT
+                );
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS file_tags (
+                    file_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+
+                    PRIMARY KEY (file_id, tag_id),
+
+                    FOREIGN KEY (file_id)
+                        REFERENCES files(id)
+                        ON UPDATE CASCADE
+                        ON DELETE CASCADE,
+
+                    FOREIGN KEY (tag_id)
+                        REFERENCES tags(id)
+                        ON UPDATE CASCADE
+                        ON DELETE CASCADE
+                );
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    file_id INTEGER,
+                    action TEXT NOT NULL,
+                    performed_by TEXT,
+                    timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    details TEXT,
+
+                    FOREIGN KEY (file_id)
+                        REFERENCES files(id)
+                        ON DELETE SET NULL
+                );
+                """
+            )
+
+            self._create_indexes(conn)
             conn.commit()
+
+def _create_indexes(self, conn):
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_status
+        ON files(workspace_id, status);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_original_filename
+        ON files(workspace_id, original_filename);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_type
+        ON files(workspace_id, document_type_id);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_date
+        ON files(workspace_id, document_date);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_archived_at
+        ON files(workspace_id, archived_at);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_source_created_at
+        ON files(workspace_id, source_created_at);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_file_ext
+        ON files(workspace_id, file_ext);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_uploaded_by
+        ON files(workspace_id, uploaded_by);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_file_tags_tag_file
+        ON file_tags(tag_id, file_id);
+        """
+    )
 
     def _migrate_files_table(self, conn):
         required_columns = {
-            # workspace / ownership
+            # workspace
             'workspace': 'TEXT',
+
+            # ownership
             'uploaded_by': 'TEXT',
 
             # file names
@@ -125,6 +312,70 @@ class ArchiveDatabase:
             if column_name in existing_columns:
                 continue
             conn.execute(f'ALTER TABLE files ADD COLUMN {column_name} {column_definition}')
+
+def _create_search_indexes(self, conn):
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace
+        ON files(workspace_id);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_filename
+        ON files(workspace_id, original_filename);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_date
+        ON files(workspace_id, document_date);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_archived_at
+        ON files(workspace_id, archived_at);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_created_at
+        ON files(workspace_id, source_created_at);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_extension
+        ON files(workspace_id, file_ext);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_type
+        ON files(workspace_id, document_type_id);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_files_workspace_uploaded_by
+        ON files(workspace_id, uploaded_by);
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_file_tags_tag
+        ON file_tags(tag_id, file_id);
+        """
+    )
 
     def get_document_types(self):
         with self._connect() as conn:

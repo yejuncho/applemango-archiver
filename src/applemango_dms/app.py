@@ -113,7 +113,7 @@ from applemango_dms.utils.images import (
 class SequenceArchiverApp:
     def __init__(self):
         self.root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
-        self._force_fullscreen = True
+        self._force_fullscreen = False
         self._window_controls_refreshers = []
         apply_window_icon(self.root)
         self.ui_font_family = self._initialize_ui_font_family()
@@ -255,6 +255,11 @@ class SequenceArchiverApp:
         if self._force_fullscreen:
             self._apply_fullscreen_mode()
             return
+        try:
+            if self.root.state() == "zoomed":
+                return
+        except Exception:
+            pass
         self.root.geometry(f"{w}x{h}")
 
     def register_window_controls_refresher(self, callback):
@@ -285,7 +290,10 @@ class SequenceArchiverApp:
                 pass
 
         if not self._force_fullscreen:
-            self._center_window(1372, 900)
+            try:
+                self.root.state("zoomed")
+            except Exception:
+                pass
 
         self._notify_window_controls_changed()
 
@@ -334,7 +342,7 @@ class SequenceArchiverApp:
         self.root.destroy()
 
     def _apply_fullscreen_mode(self):
-        self._set_fullscreen(True)
+        self._set_fullscreen(False)
 
     def clear_screen(self):
         for child in self.root.winfo_children():
@@ -594,6 +602,11 @@ class SequenceArchiverApp:
         if self._force_fullscreen:
             self._apply_fullscreen_mode()
             return
+        try:
+            if self.root.state() == "zoomed":
+                return
+        except Exception:
+            pass
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
