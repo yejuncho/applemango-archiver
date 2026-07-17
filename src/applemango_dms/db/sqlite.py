@@ -1,6 +1,5 @@
 import sqlite3
 from pathlib import Path
-from applemango_dms.config import DEFAULT_DOCUMENT_TYPES
 
 class ArchiveDatabase:
     STATUS_ACTIVE = 'active'
@@ -31,7 +30,8 @@ class ArchiveDatabase:
                     is_active INTEGER NOT NULL DEFAULT 1
                         CHECK (is_active IN (0, 1)),
 
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP,
                     deleted_at TEXT
                 );
                 """
@@ -141,16 +141,18 @@ class ArchiveDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     
                     workspace_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
 
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    name TEXT NOT NULL COLLATE NOCASE,
+
+                    created_at TEXT NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP,
 
                     UNIQUE (workspace_id, name),
 
                     FOREIGN KEY (workspace_id)
                         REFERENCES workspaces(id)
                         ON UPDATE CASCADE
-                        ON DELETE RESTRICT
+                        ON DELETE CASCADE
                 );
                 """
             )
@@ -165,31 +167,11 @@ class ArchiveDatabase:
 
                     FOREIGN KEY (file_id)
                         REFERENCES files(id)
-                        ON UPDATE CASCADE
                         ON DELETE CASCADE,
 
                     FOREIGN KEY (tag_id)
                         REFERENCES tags(id)
-                        ON UPDATE CASCADE
                         ON DELETE CASCADE
-                );
-                """
-            )
-
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                    file_id INTEGER,
-                    action TEXT NOT NULL,
-                    performed_by TEXT,
-                    timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    details TEXT,
-
-                    FOREIGN KEY (file_id)
-                        REFERENCES files(id)
-                        ON DELETE SET NULL
                 );
                 """
             )
@@ -197,232 +179,157 @@ class ArchiveDatabase:
             self._create_indexes(conn)
             conn.commit()
 
-def _create_indexes(self, conn):
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_status
-        ON files(workspace_id, status);
-        """
-    )
+    def _create_indexes(self, conn):
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_status
+            ON files(workspace_id, status);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_original_filename
-        ON files(workspace_id, original_filename);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_original_filename
+            ON files(workspace_id, original_filename);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_type
-        ON files(workspace_id, document_type_id);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_document_type
+            ON files(workspace_id, document_type_id);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_date
-        ON files(workspace_id, document_date);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_document_date
+            ON files(workspace_id, document_date);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_archived_at
-        ON files(workspace_id, archived_at);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_archived_at
+            ON files(workspace_id, archived_at);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_source_created_at
-        ON files(workspace_id, source_created_at);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_source_created_at
+            ON files(workspace_id, source_created_at);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_file_ext
-        ON files(workspace_id, file_ext);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_file_ext
+            ON files(workspace_id, file_ext);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_uploaded_by
-        ON files(workspace_id, uploaded_by);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_files_workspace_uploaded_by
+            ON files(workspace_id, uploaded_by);
+            """
+        )
 
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_file_tags_tag_file
-        ON file_tags(tag_id, file_id);
-        """
-    )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_file_tags_tag_file
+            ON file_tags(tag_id, file_id);
+            """
+        )
 
-    def _migrate_files_table(self, conn):
-        required_columns = {
-            # workspace
-            'workspace': 'TEXT',
-
-            # ownership
-            'uploaded_by': 'TEXT',
-
-            # file names
-            'original_filename': 'TEXT',
-            'archived_filename': 'TEXT',
-            'display_title': 'TEXT',
-
-            # paths
-            'full_path': 'TEXT',
-            'source_path': 'TEXT',
-
-            # document meaning
-            'document_type': 'TEXT',
-            'document_date': 'TEXT',
-            'tags': 'TEXT',
-            'description': 'TEXT',
-            'notes': 'TEXT',
-
-            # file technical metadata
-            'file_ext': 'TEXT',
-            'mime_type': 'TEXT',
-            'file_size': 'INTEGER',
-            'checksum': 'TEXT',
-
-            # lifecycle
-            'archive_date': 'TEXT',
-            'archived_at': 'TEXT DEFAULT CURRENT_TIMESTAMP',
-            'modified_at': 'TEXT',
-            'last_accessed_at': 'TEXT',
-
-            # status
-            'status': "TEXT DEFAULT 'active'",
-            'is_favorite': 'INTEGER DEFAULT 0',
-            'is_deleted': 'INTEGER DEFAULT 0',
-            'deleted_at': 'TEXT',
-        }
-
-        existing_columns = {
-            row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()
-        }
-
-        for column_name, column_definition in required_columns.items():
-            if column_name in existing_columns:
-                continue
-            conn.execute(f'ALTER TABLE files ADD COLUMN {column_name} {column_definition}')
-
-def _create_search_indexes(self, conn):
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace
-        ON files(workspace_id);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_filename
-        ON files(workspace_id, original_filename);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_date
-        ON files(workspace_id, document_date);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_archived_at
-        ON files(workspace_id, archived_at);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_created_at
-        ON files(workspace_id, source_created_at);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_extension
-        ON files(workspace_id, file_ext);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_document_type
-        ON files(workspace_id, document_type_id);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_files_workspace_uploaded_by
-        ON files(workspace_id, uploaded_by);
-        """
-    )
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_file_tags_tag
-        ON file_tags(tag_id, file_id);
-        """
-    )
-
-    def get_document_types(self):
+    def get_document_types(self, workspace_id):
         with self._connect() as conn:
-            rows = conn.execute('SELECT name FROM document_types ORDER BY name COLLATE NOCASE').fetchall()
-        values = [row[0] for row in rows]
-        return values or list(DEFAULT_DOCUMENT_TYPES)
+            rows = conn.execute(
+                """
+                SELECT id, name
+                FROM document_types
+                WHERE workspace_id = ?
+                    AND is_active = 1
+                    AND deleted_at IS NULL
+                ORDER BY sort_order, name COLLATE NOCASE;
+                """,
+                (workspace_id,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _require_text(value, field_name):
+        normalized = str(value or "").strip()
+
+        if not normalized:
+            raise ValueError(f"{field_name} is required.")
+        
+        return normalized
 
     def insert_file_record(self, record):
+        file_ext = self._require_text(
+            record.get("file_ext"),
+            "file_ext",
+        ).lower()
+
+        if not file_ext.startswith("."):
+            file_ext = f".{file_ext}"
+
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO files (
-                    workspace, uploaded_by,
-                    original_filename, archived_filename, display_title,
-                    full_path, source_path,
-                    document_type, document_date, tags, description, notes,
-                    file_ext, mime_type, file_size, checksum,
-                    archive_date, archived_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    workspace_id,
+                    document_type_id,
+                    uploaded_by,
+                    original_filename,
+                    archived_filename,
+                    relative_path,
+                    document_date,
+                    source_created_at,
+                    source_modified_at,
+                    file_ext,
+                    mime_type,
+                    file_size,
+                    checksum
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    record.get("workspace", ""),
-                    record.get("uploaded_by", ""),
-
-                    record.get("original_filename", ""),
-                    record.get("archived_filename", ""),
-                    record.get("display_title", ""),
-
-                    record.get("full_path", ""),
-                    record.get("source_path", ""),
-
-                    record.get("document_type", ""),
-                    record.get("document_date", ""),
-                    record.get("tags", ""),
-                    record.get("description", ""),
-                    record.get("notes", ""),
-
-                    record.get("file_ext", ""),
-                    record.get("mime_type", ""),
-                    int(record.get("file_size", 0) or 0),
-                    record.get("checksum", ""),
-
-                    record.get("archive_date", ""),
-                    record.get("archived_at", ""),
+                    int(record["workspace_id"]),
+                    int(record["document_type_id"]),
+                    self._require_text(
+                        record.get("uploaded_by"),
+                        "uploaded_by",
+                    ),
+                    self._require_text(
+                        record.get("original_filename"),
+                        "original_filename",
+                    ),
+                    self._require_text(
+                        record.get("archived_filename"),
+                        "archived_filename",
+                    ),
+                    self._require_text(
+                        record.get("relative_path"),
+                        "relative_path",
+                    ),
+                    self._require_text(
+                        record.get("document_date"),
+                        "document_date",
+                    ),
+                    record.get("source_created_at"),
+                    record.get("source_modified_at"),
+                    file_ext,
+                    record.get("mime_type"),
+                    record.get("file_size"),
+                    record.get("checksum"),
                 ),
             )
-            conn.commit()
+
+            return int(cursor.lastrowid)
 
     def _normalize_statuses(self, statuses):
         if statuses is None:
@@ -435,116 +342,384 @@ def _create_search_indexes(self, conn):
                 normalized.append(token)
         return normalized or [self.STATUS_ACTIVE]
 
-    def audit_missing_files(self, workspace):
-        workspace_name = str(workspace or '').strip()
-        if not workspace_name:
-            return 0
-
+    def reconcile_file_statuses(self, workspace_id):
         with self._connect() as conn:
+            workspace = conn.execute(
+                """
+                SELECT share_path
+                FROM workspaces
+                WHERE id = ?
+                AND deleted_at IS NULL
+                """,
+                (workspace_id,),
+            ).fetchone()
+
+            if workspace is None:
+                raise LookupError("Workspace not found.")
+
+            share_path = Path(workspace["share_path"])
+
+            if not share_path.exists():
+                raise ConnectionError(
+                    f"The workspace shared folder at "
+                    f"'{share_path}' is not currently accessible."
+                )
+
             rows = conn.execute(
-                'SELECT id, full_path FROM files WHERE workspace = ? AND status = ?',
-                (workspace_name, self.STATUS_ACTIVE),
+                """
+                SELECT
+                    id,
+                    relative_path,
+                    status
+                FROM files
+                WHERE workspace_id = ?
+                AND status IN (?, ?)
+                """,
+                (
+                    workspace_id,
+                    self.STATUS_ACTIVE,
+                    self.STATUS_MISSING,
+                ),
             ).fetchall()
 
             missing_ids = []
-            for row_id, full_path in rows:
+            restored_ids = []
+
+            for row in rows:
+                full_path = share_path / row["relative_path"]
+
                 try:
-                    exists = Path(str(full_path or '')).exists()
-                except Exception:
-                    exists = False
-                if not exists:
-                    missing_ids.append(int(row_id))
+                    file_exists = full_path.is_file()
+                except OSError:
+                    file_exists = False
 
-            if not missing_ids:
-                return 0
+                current_status = row["status"]
+                file_id = int(row["id"])
 
-            placeholders = ','.join('?' for _ in missing_ids)
-            conn.execute(
-                f'UPDATE files SET status = ? WHERE id IN ({placeholders})',
-                [self.STATUS_MISSING] + missing_ids,
-            )
-            conn.commit()
-            return len(missing_ids)
+                if (
+                    current_status == self.STATUS_ACTIVE
+                    and not file_exists
+                ):
+                    missing_ids.append(file_id)
 
-    def search_files(self, workspace, date_prefix=None, document_type='전체', tags='', free_text='', statuses=None):
-        self.audit_missing_files(workspace)
+                elif (
+                    current_status == self.STATUS_MISSING
+                    and file_exists
+                ):
+                    restored_ids.append(file_id)
 
-        normalized_statuses = self._normalize_statuses(statuses)
-        query = (
-            'SELECT archive_date, document_type, tags, archived_filename, uploaded_by, file_size, full_path '
-            'FROM files WHERE workspace = ?'
-        )
-        params = [workspace]
+            if missing_ids:
+                placeholders = ",".join("?" for _ in missing_ids)
 
-        status_placeholders = ','.join('?' for _ in normalized_statuses)
-        query += f' AND status IN ({status_placeholders})'
-        params.extend(normalized_statuses)
+                conn.execute(
+                    f"""
+                    UPDATE files
+                    SET status = ?
+                    WHERE workspace_id = ?
+                    AND id IN ({placeholders})
+                    """,
+                    [
+                        self.STATUS_MISSING,
+                        workspace_id,
+                        *missing_ids,
+                    ],
+                )
 
-        if date_prefix:
-            query += ' AND archive_date LIKE ?'
-            params.append(f'{date_prefix}%')
+            if restored_ids:
+                placeholders = ",".join("?" for _ in restored_ids)
 
-        if document_type and document_type != '전체':
-            query += ' AND document_type = ?'
-            params.append(document_type)
+                conn.execute(
+                    f"""
+                    UPDATE files
+                    SET status = ?
+                    WHERE workspace_id = ?
+                    AND id IN ({placeholders})
+                    """,
+                    [
+                        self.STATUS_ACTIVE,
+                        workspace_id,
+                        *restored_ids,
+                    ],
+                )
 
-        if tags:
-            query += ' AND tags LIKE ?'
-            params.append(f'%{tags}%')
+            return {
+                "marked_missing": len(missing_ids),
+                "restored_active": len(restored_ids),
+                "checked": len(rows),
+            }
 
-        if free_text:
-            query += (
-                ' AND ('
-                'original_filename LIKE ? OR archived_filename LIKE ? OR tags LIKE ? OR '
-                'uploaded_by LIKE ? OR source_path LIKE ? OR full_path LIKE ?'
-                ')'
-            )
-            token = f'%{free_text}%'
-            params.extend([token, token, token, token, token, token])
+    def audit_missing_files(self, workspace_id):
+        result = self.reconcile_file_statuses(workspace_id)
+        return result["marked_missing"]
 
-        query += ' ORDER BY archive_date DESC, archived_at DESC'
-
-        with self._connect() as conn:
-            return conn.execute(query, params).fetchall()
-
-    def count_files_by_workspace(self, workspace):
-        self.audit_missing_files(workspace)
+    def count_files_by_workspace(self, workspace_id):
         with self._connect() as conn:
             row = conn.execute(
-                'SELECT COUNT(*) FROM files WHERE workspace = ? AND status = ?',
-                (workspace, self.STATUS_ACTIVE),
+                """
+                SELECT COUNT(*)
+                FROM files
+                WHERE workspace_id = ?
+                AND status = ?
+                """,
+                (workspace_id, self.STATUS_ACTIVE),
             ).fetchone()
-        return int(row[0] if row and row[0] is not None else 0)
 
-    def get_archived_filenames(self, workspace):
+        return int(row[0])
+
+    def get_archived_filenames(self, workspace_id):
         with self._connect() as conn:
             rows = conn.execute(
-                'SELECT archived_filename FROM files WHERE workspace = ? AND archived_filename IS NOT NULL AND archived_filename != ""',
-                (workspace,),
+                """
+                SELECT archived_filename
+                FROM files
+                WHERE workspace_id = ?
+                AND archived_filename != ''
+                """,
+                (workspace_id,),
             ).fetchall()
-        return {row[0] for row in rows if row and row[0]}
 
-    def mark_files_deleted_by_paths(self, workspace, full_paths):
-        targets = [str(path) for path in full_paths if str(path).strip()]
-        if not targets:
+        return {
+            row["archived_filename"]
+            for row in rows
+        }
+
+    def mark_files_deleted(self, workspace_id, file_ids):
+        normalized_ids = list({
+            int(file_id)
+            for file_id in file_ids
+        })
+
+        if not normalized_ids:
             return 0
 
+        placeholders = ",".join("?" for _ in normalized_ids)
+
         with self._connect() as conn:
-            placeholders = ','.join('?' for _ in targets)
             cursor = conn.execute(
-                f'''
+                f"""
                 UPDATE files
                 SET
                     status = ?,
-                    is_deleted = 1,
                     deleted_at = CURRENT_TIMESTAMP
-                WHERE workspace = ? AND full_path IN ({placeholders})
-                ''',
-                [self.STATUS_DELETED, workspace] + targets,
+                WHERE workspace_id = ?
+                AND status IN (?, ?)
+                AND id IN ({placeholders})
+                """,
+                [
+                    self.STATUS_DELETED,
+                    workspace_id,
+                    self.STATUS_ACTIVE,
+                    self.STATUS_MISSING,
+                    *normalized_ids,
+                ],
             )
-            conn.commit()
+
             return int(cursor.rowcount or 0)
 
-    def delete_file_records_by_paths(self, workspace, full_paths):
-        # Backward-compatible alias. Records are now soft-deleted instead of removed.
-        return self.mark_files_deleted_by_paths(workspace, full_paths)
+    @staticmethod
+    def _normalize_tag_names(tag_names):
+        if tag_names is None:
+            return []
+
+        if isinstance(tag_names, str):
+            tag_names = [tag_names]
+
+        normalized = []
+        seen = set()
+
+        for value in tag_names:
+            name = str(value or "").strip()
+            key = name.casefold()
+
+            if name and key not in seen:
+                normalized.append(name)
+                seen.add(key)
+
+        return normalized
+
+    def assign_tags(self, workspace_id, file_id, tag_names):
+        normalized_names = self._normalize_tag_names(tag_names)
+
+        with self._connect() as conn:
+            file_row = conn.execute(
+                """
+                SELECT id
+                FROM files
+                WHERE id = ?
+                AND workspace_id = ?
+                """,
+                (file_id, workspace_id),
+            ).fetchone()
+
+            if file_row is None:
+                raise LookupError("File not found in workspace.")
+
+            for name in normalized_names:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO tags (
+                        workspace_id,
+                        name
+                    )
+                    VALUES (?, ?)
+                    """,
+                    (workspace_id, name),
+                )
+
+                tag_row = conn.execute(
+                    """
+                    SELECT id
+                    FROM tags
+                    WHERE workspace_id = ?
+                    AND name = ?
+                    """,
+                    (workspace_id, name),
+                ).fetchone()
+
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO file_tags (
+                        file_id,
+                        tag_id
+                    )
+                    VALUES (?, ?)
+                    """,
+                    (file_id, tag_row["id"]),
+                )
+
+    def get_workspace_tags(self, workspace_id):
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    created_at
+                FROM tags
+                WHERE workspace_id = ?
+                ORDER BY name COLLATE NOCASE;
+                """,
+                (workspace_id,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+    
+    def search_workspace_tags(self, workspace_id, search_text, limit=10):
+        normalized_text = str(search_text or "").strip()
+        normalized_limit = max(1, min(int(limit), 50))
+
+        with self._connect() as conn:
+            if normalized_text:
+                rows = conn.execute(
+                    """
+                    SELECT id, name
+                    FROM tags
+                    WHERE workspace_id = ?
+                    AND name LIKE ? COLLATE NOCASE
+                    ORDER BY name COLLATE NOCASE
+                    LIMIT ?;
+                    """,
+                    (
+                        workspace_id,
+                        f"{normalized_text}%",
+                        normalized_limit,
+                    ),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, name
+                    FROM tags
+                    WHERE workspace_id = ?
+                    ORDER BY name COLLATE NOCASE
+                    LIMIT ?;
+                    """,
+                    (
+                        workspace_id,
+                        normalized_limit,
+                    ),
+                ).fetchall()
+
+        return [dict(row) for row in rows]
+    
+    def get_file_tags(self, workspace_id, file_id):
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    tags.id,
+                    tags.name
+                FROM files
+                INNER JOIN file_tags
+                    ON file_tags.file_id = files.id
+                INNER JOIN tags
+                    ON tags.id = file_tags.tag_id
+                WHERE files.id = ?
+                AND files.workspace_id = ?
+                ORDER BY tags.name COLLATE NOCASE;
+                """,
+                (
+                    file_id,
+                    workspace_id,
+                ),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+    
+    def replace_file_tags(self, workspace_id, file_id, tag_names):
+        normalized_names = self._normalize_tag_names(tag_names)
+
+        with self._connect() as conn:
+            file_row = conn.execute(
+                """
+                SELECT id
+                FROM files
+                WHERE id = ?
+                AND workspace_id = ?;
+                """,
+                (file_id, workspace_id),
+            ).fetchone()
+
+            if file_row is None:
+                raise LookupError("File not found in workspace.")
+
+            conn.execute(
+                """
+                DELETE FROM file_tags
+                WHERE file_id = ?;
+                """,
+                (file_id,),
+            )
+
+            for name in normalized_names:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO tags (
+                        workspace_id,
+                        name
+                    )
+                    VALUES (?, ?);
+                    """,
+                    (workspace_id, name),
+                )
+
+                tag_row = conn.execute(
+                    """
+                    SELECT id
+                    FROM tags
+                    WHERE workspace_id = ?
+                    AND name = ?;
+                    """,
+                    (workspace_id, name),
+                ).fetchone()
+
+                conn.execute(
+                    """
+                    INSERT INTO file_tags (
+                        file_id,
+                        tag_id
+                    )
+                    VALUES (?, ?);
+                    """,
+                    (file_id, tag_row["id"]),
+                )
