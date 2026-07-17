@@ -38,6 +38,8 @@ applemango-dms/
 │
 ├── docs/
 │
+├── legacy/
+|
 ├── README.md
 ├── requirements.txt
 └── .gitignore
