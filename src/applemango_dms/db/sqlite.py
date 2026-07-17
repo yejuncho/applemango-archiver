@@ -259,6 +259,266 @@ class ArchiveDatabase:
 
         return [dict(row) for row in rows]
 
+    def ensure_workspace(self, workspace_name, share_path, default_document_types):
+        normalized_name = self._require_text(workspace_name, "workspace_name")
+        normalized_share_path = self._require_text(str(share_path), "share_path")
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM workspaces
+                WHERE name = ?
+                """,
+                (normalized_name,),
+            ).fetchone()
+
+            if row is None:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO workspaces (
+                        name,
+                        share_path,
+                        is_active,
+                        deleted_at
+                    )
+                    VALUES (?, ?, 1, NULL)
+                    """,
+                    (normalized_name, normalized_share_path),
+                )
+                workspace_id = int(cursor.lastrowid)
+            else:
+                workspace_id = int(row["id"])
+                conn.execute(
+                    """
+                    UPDATE workspaces
+                    SET
+                        share_path = ?,
+                        is_active = 1,
+                        deleted_at = NULL
+                    WHERE id = ?
+                    """,
+                    (normalized_share_path, workspace_id),
+                )
+
+            for idx, doc_type in enumerate(default_document_types):
+                name = self._require_text(doc_type, "document_type")
+                existing = conn.execute(
+                    """
+                    SELECT id
+                    FROM document_types
+                    WHERE workspace_id = ?
+                    AND name = ?
+                    """,
+                    (workspace_id, name),
+                ).fetchone()
+
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO document_types (
+                            workspace_id,
+                            name,
+                            is_active,
+                            sort_order,
+                            deleted_at
+                        )
+                        VALUES (?, ?, 1, ?, NULL)
+                        """,
+                        (workspace_id, name, idx),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE document_types
+                        SET
+                            is_active = 1,
+                            sort_order = ?,
+                            deleted_at = NULL
+                        WHERE id = ?
+                        """,
+                        (idx, int(existing["id"])),
+                    )
+
+        return workspace_id
+
+    def search_files(self, workspace_id, date_prefix=None, document_type="전체", tags="", free_text=""):
+        clauses = [
+            "f.workspace_id = ?",
+            "f.status = ?",
+        ]
+        params = [int(workspace_id), self.STATUS_ACTIVE]
+
+        normalized_date_prefix = str(date_prefix or "").strip()
+        if normalized_date_prefix:
+            clauses.append("f.document_date LIKE ?")
+            params.append(f"{normalized_date_prefix}%")
+
+        normalized_document_type = str(document_type or "").strip()
+        if normalized_document_type and normalized_document_type != "전체":
+            clauses.append("dt.name = ?")
+            params.append(normalized_document_type)
+
+        normalized_tags = [
+            token.strip()
+            for token in str(tags or "").replace(";", ",").split(",")
+            if token.strip()
+        ]
+        for token in normalized_tags:
+            clauses.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM file_tags ft2
+                    INNER JOIN tags t2
+                        ON t2.id = ft2.tag_id
+                    WHERE ft2.file_id = f.id
+                    AND t2.name LIKE ? COLLATE NOCASE
+                )
+                """
+            )
+            params.append(f"%{token}%")
+
+        normalized_free_text = str(free_text or "").strip()
+        if normalized_free_text:
+            clauses.append(
+                """
+                (
+                    f.original_filename LIKE ? COLLATE NOCASE
+                    OR f.archived_filename LIKE ? COLLATE NOCASE
+                    OR f.uploaded_by LIKE ? COLLATE NOCASE
+                    OR f.relative_path LIKE ? COLLATE NOCASE
+                    OR EXISTS (
+                        SELECT 1
+                        FROM file_tags ft3
+                        INNER JOIN tags t3
+                            ON t3.id = ft3.tag_id
+                        WHERE ft3.file_id = f.id
+                        AND t3.name LIKE ? COLLATE NOCASE
+                    )
+                )
+                """
+            )
+            free_like = f"%{normalized_free_text}%"
+            params.extend([free_like, free_like, free_like, free_like, free_like])
+
+        where_sql = " AND ".join(clauses)
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    f.document_date AS archive_date,
+                    dt.name AS document_type,
+                    COALESCE(
+                        GROUP_CONCAT(DISTINCT t.name),
+                        ''
+                    ) AS tags,
+                    f.archived_filename,
+                    f.uploaded_by,
+                    COALESCE(f.file_size, 0) AS file_size,
+                    w.share_path,
+                    f.relative_path
+                FROM files f
+                INNER JOIN workspaces w
+                    ON w.id = f.workspace_id
+                INNER JOIN document_types dt
+                    ON dt.id = f.document_type_id
+                    AND dt.workspace_id = f.workspace_id
+                LEFT JOIN file_tags ft
+                    ON ft.file_id = f.id
+                LEFT JOIN tags t
+                    ON t.id = ft.tag_id
+                WHERE {where_sql}
+                GROUP BY f.id
+                ORDER BY f.document_date DESC, f.archived_at DESC
+                """,
+                params,
+            ).fetchall()
+
+        results = []
+        for row in rows:
+            full_path = str(Path(row["share_path"]) / row["relative_path"])
+            results.append(
+                (
+                    row["archive_date"],
+                    row["document_type"],
+                    row["tags"],
+                    row["archived_filename"],
+                    row["uploaded_by"],
+                    int(row["file_size"] or 0),
+                    full_path,
+                )
+            )
+
+        return results
+
+    def mark_files_deleted_by_paths(self, workspace_id, full_paths):
+        normalized_paths = [
+            str(Path(path))
+            for path in (full_paths or [])
+            if str(path or "").strip()
+        ]
+        if not normalized_paths:
+            return 0
+
+        workspace_id = int(workspace_id)
+        with self._connect() as conn:
+            workspace = conn.execute(
+                """
+                SELECT share_path
+                FROM workspaces
+                WHERE id = ?
+                """,
+                (workspace_id,),
+            ).fetchone()
+
+            if workspace is None:
+                return 0
+
+            share_path = Path(workspace["share_path"])
+            relative_paths = []
+
+            for value in normalized_paths:
+                full_path = Path(value)
+                relative = None
+                try:
+                    relative = full_path.relative_to(share_path)
+                except ValueError:
+                    full_text = str(full_path).replace("/", "\\").lower()
+                    share_text = str(share_path).replace("/", "\\").rstrip("\\").lower()
+                    prefix = f"{share_text}\\"
+                    if full_text.startswith(prefix):
+                        relative = Path(full_text[len(prefix):])
+
+                if relative is not None:
+                    relative_paths.append(str(relative).replace("/", "\\"))
+
+            if not relative_paths:
+                return 0
+
+            placeholders = ",".join("?" for _ in relative_paths)
+            cursor = conn.execute(
+                f"""
+                UPDATE files
+                SET
+                    status = ?,
+                    deleted_at = CURRENT_TIMESTAMP
+                WHERE workspace_id = ?
+                AND status IN (?, ?)
+                AND relative_path IN ({placeholders})
+                """,
+                [
+                    self.STATUS_DELETED,
+                    workspace_id,
+                    self.STATUS_ACTIVE,
+                    self.STATUS_MISSING,
+                    *relative_paths,
+                ],
+            )
+
+            return int(cursor.rowcount or 0)
+
     @staticmethod
     def _require_text(value, field_name):
         normalized = str(value or "").strip()

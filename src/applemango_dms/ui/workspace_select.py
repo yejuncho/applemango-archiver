@@ -23,7 +23,12 @@ def show_workspace_selection_screen(app):
     app.root.configure(bg="#ffffff")
 
     if state.is_demo_mode:
-        shares = app._load_demo_workspace_names()
+        try:
+            shares = app._load_demo_workspace_names()
+        except FileNotFoundError as exc:
+            messagebox.showerror("데모 모드", str(exc), parent=app.root)
+            app.show_login_screen()
+            return
     else:
         shares = discover_server_shares(config.default_server_name)
 
@@ -91,14 +96,18 @@ def show_workspace_selection_screen(app):
     stack_canvas.pack(side="left", fill="both", expand=True, padx=(0, 2), pady=(2, 0))
 
     def enter_workspace(selected):
-        if state.is_demo_mode:
-            app.set_workspace(selected, "", False)
-        else:
-            drive, mapped_by_app, err = app.workspace_manager.map_workspace(selected, state.session_username, state.session_password)
-            if not drive:
-                messagebox.showerror("워크스페이스", f"워크스페이스 드라이브 매핑에 실패했습니다:\n{err}", parent=app.root)
-                return
-            app.set_workspace(selected, drive, mapped_by_app)
+        try:
+            if state.is_demo_mode:
+                app.set_workspace(selected, "", False)
+            else:
+                drive, mapped_by_app, err = app.workspace_manager.map_workspace(selected, state.session_username, state.session_password)
+                if not drive:
+                    messagebox.showerror("워크스페이스", f"워크스페이스 드라이브 매핑에 실패했습니다:\n{err}", parent=app.root)
+                    return
+                app.set_workspace(selected, drive, mapped_by_app)
+        except Exception as exc:
+            messagebox.showerror("워크스페이스", f"워크스페이스 초기화에 실패했습니다:\n{exc}", parent=app.root)
+            return
         app.show_main_workspace_menu()
 
     if not shares:

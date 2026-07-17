@@ -45,11 +45,18 @@ def show_search_files_screen(app):
     scroll_canvas.bind("<MouseWheel>", lambda e: scroll_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
     workspace_var = tk.StringVar(value=state.active_workspace)
+    workspace_id = getattr(state, "active_workspace_id", None)
     date_entry_var = tk.StringVar(value="")
     doc_type_var = tk.StringVar(value="전체")
     tags_var = tk.StringVar(value="")
     free_var = tk.StringVar(value="")
     app._bind_iso_date_formatter(date_entry_var)
+
+    if workspace_id is None:
+        raise RuntimeError("No active workspace ID is available.")
+
+    document_type_records = app.db.get_document_types(workspace_id)
+    document_type_options = [record["name"] for record in document_type_records]
 
     def _parse_date_input():
         parts = date_entry_var.get().strip().split("-")
@@ -93,7 +100,7 @@ def show_search_files_screen(app):
 
     tk.Label(filters, text="문서 유형", bg="#fbfbff", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=3)
     ttk.Combobox(filters, textvariable=doc_type_var,
-             values=["전체"] + app.db.get_document_types(),
+             values=["전체"] + document_type_options,
                  state="readonly", width=24).grid(row=2, column=1, sticky="w", pady=3)
 
     tk.Label(filters, text="태그", bg="#fbfbff", width=16, anchor="w").grid(row=3, column=0, sticky="w", pady=3)
@@ -174,7 +181,7 @@ def show_search_files_screen(app):
 
     def run_search():
         clear_results()
-        if not state.active_workspace:
+        if not state.active_workspace or workspace_id is None:
             messagebox.showerror("파일 검색", "활성 워크스페이스가 없습니다.", parent=app.root)
             return
         try:
@@ -183,10 +190,10 @@ def show_search_files_screen(app):
             messagebox.showerror("파일 검색", str(exc), parent=app.root)
             return
 
-        app.db.audit_missing_files(state.active_workspace)
+        app.db.audit_missing_files(workspace_id)
 
         rows = app.db.search_files(
-            workspace=state.active_workspace,
+            workspace_id=workspace_id,
             date_prefix=date_prefix,
             document_type=doc_type_var.get(),
             tags=tags_var.get().strip(),
@@ -260,7 +267,7 @@ def show_search_files_screen(app):
             except OSError as exc:
                 errors.append(f"{path.name}: {exc}")
         if deleted_paths:
-            app.db.mark_files_deleted_by_paths(state.active_workspace, deleted_paths)
+            app.db.mark_files_deleted_by_paths(workspace_id, deleted_paths)
         if errors:
             messagebox.showerror("파일 삭제", "일부 파일 삭제에 실패했습니다:\n\n" + "\n".join(errors), parent=app.root)
         run_search()

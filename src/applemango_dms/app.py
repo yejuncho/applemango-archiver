@@ -34,7 +34,7 @@ import applemango_dms.config as config
 
 import applemango_dms.state as state
 
-from applemango_dms.db.archive_db import ArchiveDatabase
+from applemango_dms.db.sqlite import ArchiveDatabase
 
 from applemango_dms.services.auth import (
     load_saved_credentials,
@@ -371,11 +371,11 @@ class SequenceArchiverApp:
 
         candidate_paths = [
             Path(config.logo_path),
-            config.PROJECT_ROOT / "assets" / "images" / "applemango_logo.png",
-            config.PROJECT_ROOT / "assets" / "images" / "hiscom_logo.png",
-            config.PROJECT_ROOT / "assets" / "images" / "applemango_mission.png",
-            config.PROJECT_ROOT / "assets" / "images" / "phileo.png",
-            config.PROJECT_ROOT / "assets" / "images" / "hansomang.png",
+            config.PROJECT_ROOT / "assets" / "logos" / "applemango_logo.png",
+            config.PROJECT_ROOT / "assets" / "logos" / "hiscom_logo.png",
+            config.PROJECT_ROOT / "assets" / "logos" / "applemango_mission.png",
+            config.PROJECT_ROOT / "assets" / "logos" / "phileo.png",
+            config.PROJECT_ROOT / "assets" / "logos" / "hansomang.png",
         ]
 
         for path in candidate_paths:
@@ -394,7 +394,7 @@ class SequenceArchiverApp:
         if Image is None or ImageTk is None:
             return None
 
-        path = config.PROJECT_ROOT / "assets" / "images" / "hiscom.png"
+        path = config.PROJECT_ROOT / "assets" / "logos" / "hiscom.png"
         if not path.exists():
             return None
 
@@ -409,12 +409,12 @@ class SequenceArchiverApp:
         if Image is None or ImageTk is None:
             return None
 
-        image_root = config.PROJECT_ROOT / "assets" / "images"
+        image_root = config.PROJECT_ROOT / "assets" / "logos"
         png_paths = sorted(image_root.glob("*.png"))
         if not png_paths:
             return None
 
-        # Randomly pick from up to five PNG logo files in assets/images.
+        # Randomly pick from up to five PNG logo files in assets/logos.
         candidate_pool = png_paths[:5]
         selected_path = random.choice(candidate_pool)
 
@@ -676,16 +676,12 @@ class SequenceArchiverApp:
 
     @staticmethod
     def _get_demo_workspace_base_path():
-        return config.PROJECT_ROOT / "demo_workspace"
+        return config.DEMO_WORKSPACES_DIR
 
     def _ensure_demo_workspace_root(self):
         root = self._get_demo_workspace_base_path()
-        root.mkdir(parents=True, exist_ok=True)
-
-        has_subfolders = any(child.is_dir() for child in root.iterdir())
-        if not has_subfolders:
-            for default_name in ("General", "Test", "Sandbox"):
-                (root / default_name).mkdir(parents=True, exist_ok=True)
+        if not root.exists() or not root.is_dir():
+            raise FileNotFoundError("No local demo directory found")
 
         return root
 
@@ -697,6 +693,7 @@ class SequenceArchiverApp:
         state.active_workspace = workspace
         state.active_workspace_drive = drive_letter
         self.workspace_drive_mapped_by_app = mapped_by_app
+        state.active_workspace_id = self._ensure_workspace_context(workspace)
 
     def clear_workspace(self, unmap_if_needed=False):
 
@@ -704,6 +701,7 @@ class SequenceArchiverApp:
             self.workspace_manager.unmap_drive(state.active_workspace_drive)
 
         state.active_workspace = ""
+        state.active_workspace_id = None
         state.active_workspace_drive = ""
         self.workspace_drive_mapped_by_app = False
 
@@ -734,23 +732,72 @@ class SequenceArchiverApp:
     def show_password_login_screen(self, username):
         return ui_show_password_login_screen(self, username)
 
-    @staticmethod
-    def _get_local_archive_db_path():
-        return Path.home() / ".applemango_archiver" / "applemango.db"
-
     def _resolve_archive_db_path(self):
         if state.is_demo_mode:
-            return self._get_local_archive_db_path()
+            return Path(config.DEMO_DB_PATH)
         return Path(config.archive_db_path)
+
+    def _resolve_workspace_share_path(self, workspace_name):
+        normalized_name = str(workspace_name or "").strip()
+        if not normalized_name:
+            raise ValueError("Workspace name is required.")
+
+        if state.is_demo_mode:
+            return self._ensure_demo_workspace_root() / normalized_name
+
+        return Path(fr"{config.default_server_name}\{normalized_name}")
+
+    def _ensure_workspace_context(self, workspace_name):
+        if self.db is None:
+            raise RuntimeError("Database is not initialized.")
+
+        share_path = self._resolve_workspace_share_path(workspace_name)
+        return self.db.ensure_workspace(
+            workspace_name,
+            share_path,
+            config.DEFAULT_DOCUMENT_TYPES,
+        )
+
+    def _initialize_demo_data(self):
+        root = self._ensure_demo_workspace_root()
+        workspace_names = sorted([child.name for child in root.iterdir() if child.is_dir()])
+        for workspace_name in workspace_names:
+            self.db.ensure_workspace(
+                workspace_name,
+                root / workspace_name,
+                config.DEFAULT_DOCUMENT_TYPES,
+            )
+
+        return True
 
     def ensure_database_ready(self):
         target_path = self._resolve_archive_db_path()
         current_path = Path(self.db.db_path) if self.db is not None else None
+
+        if state.is_demo_mode:
+            try:
+                self._ensure_demo_workspace_root()
+            except Exception as exc:
+                messagebox.showerror("데이터베이스 오류", str(exc), parent=self.root)
+                return False
+
         if current_path == target_path:
+            if state.is_demo_mode:
+                try:
+                    return self._initialize_demo_data()
+                except Exception as exc:
+                    messagebox.showerror(
+                        "데이터베이스 오류",
+                        f"데모 데이터 초기화에 실패했습니다.\n오류: {exc}",
+                        parent=self.root,
+                    )
+                    return False
             return True
 
         try:
             self.db = ArchiveDatabase(target_path)
+            if state.is_demo_mode:
+                self._initialize_demo_data()
             return True
         except Exception as exc:
             messagebox.showerror(

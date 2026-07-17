@@ -1,15 +1,11 @@
 import tkinter as tk
 import shutil
-import random
 from pathlib import Path
 
 import applemango_dms.state as state
 import applemango_dms.config as config
 
 def _get_nas_storage_usage_bytes(app):
-    if state.is_demo_mode:
-        return 0, 0
-
     candidates = []
     workspace_root = app.get_workspace_root_path()
     if workspace_root:
@@ -187,7 +183,6 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     storage_card.pack(fill="x")
 
     usage_data = _format_nas_usage_display(*_get_nas_storage_usage_bytes(app))
-    demo_ratio = random.random() if state.is_demo_mode else usage_data["ratio"]
 
     def draw_storage_card(_event=None):
         storage_card.delete("usage")
@@ -241,7 +236,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             tags="usage",
         )
 
-        ratio = max(0.0, min(1.0, demo_ratio if state.is_demo_mode else usage_data["ratio"]))
+        ratio = max(0.0, min(1.0, usage_data["ratio"]))
         if ratio > 0:
             fill_x2 = bar_x1 + max((bar_y2 - bar_y1), int((bar_x2 - bar_x1) * ratio))
             fill_x2 = min(bar_x2, fill_x2)

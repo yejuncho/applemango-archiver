@@ -12,7 +12,7 @@ def apply_window_icon(window):
 
     def _set_icon():
         try:
-            icon_path = config.PROJECT_ROOT / "assets" / "images" / "hiscom.png"
+            icon_path = config.PROJECT_ROOT / "assets" / "logos" / "hiscom.png"
             if not icon_path.exists():
                 return
 

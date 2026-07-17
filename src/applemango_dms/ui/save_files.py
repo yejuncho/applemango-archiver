@@ -56,12 +56,32 @@ def show_save_files_screen(app):
     row_metadata_state = {}
     pending_count_var = tk.StringVar(value="업로드 대기 파일 (0)")
     refresh_row3_rows = lambda: None
-    try:
-        document_type_options = app.db.get_document_types()
-    except Exception:
-        document_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
+
+    workspace_id = getattr(state, "active_workspace_id", None)
+
+    if workspace_id is None:
+        raise RuntimeError(
+            "No active workspace ID is available."
+        )
+
+    document_type_records = app.db.get_document_types(
+        workspace_id
+    )
+
+    document_type_options = [
+        record["name"]
+        for record in document_type_records
+    ]
+
+    document_type_id_by_name = {
+        record["name"]: int(record["id"])
+        for record in document_type_records
+    }
+
     if not document_type_options:
-        document_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
+        raise RuntimeError(
+            "This workspace has no active document types."
+        )
 
     split = tk.Frame(board, bg="#ffffff")
     split.pack(fill="both", expand=True, padx=10, pady=0)
@@ -279,9 +299,19 @@ def show_save_files_screen(app):
                 row_state = row_metadata_state.setdefault(row_key, {})
                 selected_document_date = row_state.get("date_iso") or datetime.now().strftime("%Y-%m-%d")
                 doc_type = row_state.get("document_type") or "기타"
-                tags = row_state.get("tags", "")
+                
+                tags = row_state.get("tags") or ""
+
+                destination_path = None
 
                 try:
+                    document_type_id = document_type_id_by_name.get(
+                    doc_type
+                    )
+                    if document_type_id is None:
+                        raise ValueError(
+                            f"Unknown document type: {doc_type}"
+                        )
                     if not source.exists() or not source.is_file():
                         raise FileNotFoundError(f"source missing: {source}")
 
@@ -309,25 +339,80 @@ def show_save_files_screen(app):
 
                     shutil.copystat(source, destination_path)
 
-                    app.db.insert_file_record({
-                        "workspace": state.active_workspace or "",
-                        "original_filename": source.name,
-                        "archived_filename": archived_name,
-                        "full_path": str(destination_path),
-                        "document_type": doc_type,
-                        "document_date": selected_document_date,
-                        "tags": tags,
-                        "uploaded_by": state.session_account_name or state.session_username or "",
-                        "archive_date": datetime.now().strftime("%Y-%m-%d"),
-                        "archived_at": datetime.now().isoformat(timespec="seconds"),
-                        "file_ext": source.suffix,
-                        "file_size": destination_path.stat().st_size if destination_path.exists() else 0,
-                        "source_path": str(source),
-                    })
+                    relative_path = destination_path.relative_to(destination)
+
+                    source_stat = source.stat()
+
+                    file_id = app.db.insert_file_record(
+                        {
+                            "workspace_id": workspace_id,
+                            "document_type_id": document_type_id,
+                            "uploaded_by": (
+                                state.session_account_name
+                                or state.session_username
+                                or "unknown"
+                            ),
+                            "original_filename": source.name,
+                            "archived_filename": archived_name,
+                            "relative_path": str(relative_path),
+                            "document_date": selected_document_date,
+                            "source_created_at": datetime.fromtimestamp(
+                                source_stat.st_ctime
+                            ).isoformat(timespec="seconds"),
+                            "source_modified_at": datetime.fromtimestamp(
+                                source_stat.st_mtime
+                            ).isoformat(timespec="seconds"),
+                            "file_ext": source.suffix,
+                            "mime_type": None,
+                            "file_size": destination_path.stat().st_size,
+                            "checksum": None,
+                        }
+                    )
+
+                    tag_names = [
+                        value.strip() for value in re.split(r"[,;]", tags) if value.strip()]
+
+                    app.db.assign_tags(
+                        workspace_id,
+                        file_id,
+                        tag_names,
+                    )
 
                     app.root.after(0, lambda key=row_key: (set_row_upload_state(key, status_code="success", progress_ratio=1.0), refresh_row3_rows()))
-                except Exception:
-                    app.root.after(0, lambda key=row_key: (set_row_upload_state(key, status_code="failed", progress_ratio=0.0), refresh_row3_rows()))
+ 
+                except Exception as exc:
+                    if (
+                        destination_path is not None and destination_path.exists()
+                    ):
+                        try:
+                            destination_path.unlink()
+                        except OSError as cleanup_exc:
+                            print(
+                                f"Failed to remove incomplete upload "
+                                f"{destination_path}: {cleanup_exc}"
+                            )
+                    print(
+                        f"Upload failed for {source}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+                    app.root.after(
+                        0,
+                        lambda key=row_key, message=str(exc): (
+                            row_metadata_state.setdefault(
+                                key,
+                                {},
+                            ).update(
+                                {"error_message": message}
+                            ),
+                            set_row_upload_state(
+                                key,
+                                status_code="failed",
+                                progress_ratio=0.0,
+                            ),
+                            refresh_row3_rows(),
+                        ),
+                    )
 
         threading.Thread(target=upload_worker, args=(targets,), daemon=True).start()
         return None

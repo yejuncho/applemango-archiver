@@ -381,14 +381,10 @@ def show_login_screen(app, prefill_username=None):
     def submit_login():
         username = username_field["get_value"]()
         password = password_field["get_value"]()
-        if not username or not password:
-            messagebox.showerror("로그인", "사용자명과 비밀번호를 입력하세요.", parent=app.root)
-            return
-
         state.is_demo_mode = bool(demo_mode_var.get())
 
         if state.is_demo_mode:
-            normalized_username = username.strip()
+            normalized_username = username.strip() or "test"
             account_name = normalized_username
             if "\\" in account_name:
                 account_name = account_name.split("\\")[-1]
@@ -400,12 +396,16 @@ def show_login_screen(app, prefill_username=None):
             state.session_password = ""
             state.session_account_name = account_name
 
-            if remember_var.get():
+            if remember_var.get() and username.strip() and password:
                 save_credentials(username, password)
             else:
                 clear_saved_credentials()
 
             app.show_workspace_selection_screen()
+            return
+
+        if not username or not password:
+            messagebox.showerror("로그인", "사용자명과 비밀번호를 입력하세요.", parent=app.root)
             return
 
         network_warning_msg = (
@@ -490,12 +490,16 @@ def show_login_screen(app, prefill_username=None):
     app._start_login_connectivity_polling()
 
     def update_login_button(*_args):
+        if demo_mode_var.get():
+            login_btn.set_enabled(True)
+            return
         has_username = bool(username_field["get_value"]())
         has_password = bool(password_field["get_value"]())
         login_btn.set_enabled(has_username and has_password)
 
     username_field["var"].trace_add("write", update_login_button)
     password_field["var"].trace_add("write", update_login_button)
+    demo_mode_var.trace_add("write", update_login_button)
     username_field["entry"].bind("<Return>", lambda _e: password_field["focus"]())
     password_field["entry"].bind("<Return>", lambda _e: submit_login())
     update_login_button()
