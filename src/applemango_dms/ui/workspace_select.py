@@ -8,6 +8,14 @@ import applemango_dms.state as state
 from applemango_dms.services.nas import discover_server_shares
 from applemango_dms.ui.widgets import WorkspaceStack
 from applemango_dms.ui.header_controls import build_header_controls
+from applemango_dms.ui import colors
+
+WS_BG = colors.BACKGROUND
+WS_CARD_BG = colors.SURFACE
+WS_CARD_HOVER_BG = colors.SURFACE_ALT2
+WS_TITLE_COLOR = colors.TEXT_PRIMARY
+WS_TEXT_PRIMARY = colors.TEXT_PRIMARY
+WS_TEXT_SECONDARY = colors.TEXT_SECONDARY
 
 def show_workspace_selection_screen(app):
     app._stop_login_connectivity_polling()
@@ -20,7 +28,7 @@ def show_workspace_selection_screen(app):
     app._center_window(760, 680)
     app.root.title("애플망고 DMS - 워크스페이스 선택")
     app.clear_screen()
-    app.root.configure(bg="#ffffff")
+    app.root.configure(bg=WS_BG)
 
     if state.is_demo_mode:
         try:
@@ -32,15 +40,15 @@ def show_workspace_selection_screen(app):
     else:
         shares = discover_server_shares(config.default_server_name)
 
-    bg = tk.Canvas(app.root, bg="#ffffff", highlightthickness=0, bd=0)
+    bg = tk.Canvas(app.root, bg=WS_BG, highlightthickness=0, bd=0)
     bg.pack(fill="both", expand=True)
 
     main_card = app.create_card(
         bg,
         width=702,
         height=596,
-        fill_top="#ffffff",
-        fill_bottom="#ffffff",
+        fill_top=WS_CARD_BG,
+        fill_bottom=WS_CARD_BG,
     )
     content = main_card["content"]
     redraw = main_card["redraw"]
@@ -50,14 +58,14 @@ def show_workspace_selection_screen(app):
 
     bg.bind("<Configure>", on_bg_resize)
 
-    content.configure(bg="#ffffff")
-    container = tk.Frame(content, bg="#ffffff")
+    content.configure(bg=WS_CARD_BG)
+    container = tk.Frame(content, bg=WS_CARD_BG)
     container.pack(fill="both", expand=True)
 
-    header_row = tk.Frame(container, bg="#ffffff")
+    header_row = tk.Frame(container, bg=WS_CARD_BG)
     header_row.pack(fill="x", pady=(0, 18))
 
-    left_header = tk.Frame(header_row, bg="#ffffff")
+    left_header = tk.Frame(header_row, bg=WS_CARD_BG)
     left_header.pack(side="left", fill="x", expand=True)
 
     display_name = state.session_account_name or state.session_username or "사용자"
@@ -65,34 +73,34 @@ def show_workspace_selection_screen(app):
         left_header,
         text=f"환영합니다, {display_name}님",
         font=app._font(20, "bold"),
-        fg="#06012a",
-        bg="#ffffff",
+        fg=WS_TITLE_COLOR,
+        bg=WS_CARD_BG,
         anchor="w",
     ).pack(anchor="w")
     tk.Label(
         left_header,
         text="워크스페이스를 선택해주세요.",
         font=app._font(12),
-        fg="#000000",
-        bg="#ffffff",
+        fg=WS_TEXT_PRIMARY,
+        bg=WS_CARD_BG,
         anchor="w",
     ).pack(anchor="w", pady=(6, 0))
 
-    right_header = tk.Frame(header_row, bg="#ffffff", bd=0, highlightthickness=0)
+    right_header = tk.Frame(header_row, bg=WS_CARD_BG, bd=0, highlightthickness=0)
     right_header.pack(side="right", anchor="ne")
 
-    button_row = tk.Frame(right_header, bg="#ffffff")
+    button_row = tk.Frame(right_header, bg=WS_CARD_BG)
     button_row.pack(anchor="e")
-    controls = build_header_controls(app, button_row, context="workspace_selection", bg="#ffffff")
+    controls = build_header_controls(app, button_row, context="workspace_selection", bg=WS_CARD_BG)
     controls.pack(side="left")
 
-    list_shell = tk.Canvas(container, bg="#ffffff", highlightthickness=0, bd=0)
+    list_shell = tk.Canvas(container, bg=WS_CARD_BG, highlightthickness=0, bd=0)
     list_shell.pack(fill="both", expand=True)
 
-    stack_surface = tk.Frame(list_shell, bg="#ffffff")
+    stack_surface = tk.Frame(list_shell, bg=WS_CARD_BG)
     surface_window = list_shell.create_window(0, 0, window=stack_surface, anchor="nw")
 
-    stack_canvas = tk.Canvas(stack_surface, bg="#ffffff", highlightthickness=0, bd=0)
+    stack_canvas = tk.Canvas(stack_surface, bg=WS_CARD_BG, highlightthickness=0, bd=0)
     stack_canvas.pack(side="left", fill="both", expand=True, padx=(0, 2), pady=(2, 0))
 
     def enter_workspace(selected):
@@ -114,8 +122,8 @@ def show_workspace_selection_screen(app):
         empty_label = tk.Label(
             stack_surface,
             text="선택 가능한 워크스페이스가 없습니다.",
-            bg="#ffffff",
-            fg="#666666",
+            bg=WS_CARD_BG,
+            fg=WS_TEXT_SECONDARY,
             font=app._font(11),
             anchor="w",
         )
@@ -126,8 +134,9 @@ def show_workspace_selection_screen(app):
             stack_canvas,
             shares,
             on_open=enter_workspace,
-            bg="#ffffff",
-            card_bg="#ffffff",
+            bg=WS_CARD_BG,
+            card_bg=WS_CARD_BG,
+            card_hover_bg=WS_CARD_HOVER_BG,
             meta_icon_photos={
                 "clock": app.ui_icon_photos.get("workspace_clock"),
                 "database": app.ui_icon_photos.get("workspace_database"),

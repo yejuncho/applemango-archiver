@@ -11,17 +11,22 @@ from applemango_dms.services.auth import (
     clear_session_login,
 )
 
+from applemango_dms.ui import colors
+
+SU_BG = colors.BACKGROUND
+SU_TEXT_PRIMARY = colors.TEXT_PRIMARY
+
 def show_startup_screen(app):
     app._stop_login_connectivity_polling()
     app._center_window(420, 560)
     app.root.title("애플망고 DMS")
     app.clear_screen()
-    app.root.configure(bg="#faf9f6")
+    app.root.configure(bg=SU_BG)
 
-    shell = tk.Frame(app.root, bg="#faf9f6")
+    shell = tk.Frame(app.root, bg=SU_BG)
     shell.pack(fill="both", expand=True)
 
-    logo_label = tk.Label(shell, bg="#faf9f6")
+    logo_label = tk.Label(shell, bg=SU_BG)
     logo_label.place(relx=0.5, rely=0.45, anchor="center")
 
     logo_photo = app._load_startup_logo_photo(max_width=300, max_height=180)
@@ -29,7 +34,7 @@ def show_startup_screen(app):
     if logo_photo is not None:
         logo_label.configure(image=logo_photo)
     else:
-        logo_label.configure(text="HISCOM", font=app._font(30, "bold"), fg="#1d2138")
+        logo_label.configure(text="HISCOM", font=app._font(30, "bold"), fg=SU_TEXT_PRIMARY)
 
     app.root.after(1200, app.route_from_startup)
 

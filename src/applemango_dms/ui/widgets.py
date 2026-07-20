@@ -1,8 +1,23 @@
 import time
 import tkinter as tk
 
+from applemango_dms.ui import colors
+
+W_CARD_SURFACE = colors.SURFACE
+W_CARD_SURFACE_HOVER = colors.SURFACE_ALT2
+W_CARD_BORDER = colors.BORDER
+W_CARD_BORDER_HOVER = colors.BORDER_SOFT
+W_CARD_SHADOW_A = colors.SECONDARY_SOFT
+W_CARD_SHADOW_B = colors.BORDER_SOFT
+
+W_ICON_COLOR = colors.SECONDARY
+W_TITLE_COLOR = colors.TEXT_TINT
+W_TITLE_COLOR_ACTIVE = colors.TEXT_PRIMARY
+W_CHEVRON_COLOR = colors.TEXT_PRIMARY
+W_META_COLOR = colors.TEXT_PRIMARY
+
 class WorkspaceCard(tk.Canvas):
-    def __init__(self, parent, workspace_name, on_select=None, on_open=None, surface_bg="#f9f8ff", meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
+    def __init__(self, parent, workspace_name, on_select=None, on_open=None, surface_bg=W_CARD_SURFACE, surface_hover_bg=W_CARD_SURFACE_HOVER, meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
         self._card_height = 216
         super().__init__(
             parent,
@@ -18,6 +33,7 @@ class WorkspaceCard(tk.Canvas):
         self.on_select = on_select
         self.on_open = on_open
         self.surface_bg = surface_bg
+        self.surface_hover_bg = surface_hover_bg
         self.card_fill_bg = surface_bg
         self.meta_icon_photos = meta_icon_photos or {}
         self.folder_icon_photo = folder_icon_photo
@@ -38,7 +54,7 @@ class WorkspaceCard(tk.Canvas):
         self.folder_icon = tk.Label(
             self.content,
             bg=self.surface_bg,
-            fg="#6ea7ff",
+            fg=W_ICON_COLOR,
             anchor="w",
         )
         if self.folder_icon_photo is not None:
@@ -53,7 +69,7 @@ class WorkspaceCard(tk.Canvas):
             text=workspace_name,
             font=(self.font_family, 15, "bold"),
             bg=self.surface_bg,
-            fg="#151933",
+            fg=W_TITLE_COLOR,
             anchor="w",
         )
         self.title_label.place(x=44, y=12, relwidth=1.0, height=28)
@@ -63,7 +79,7 @@ class WorkspaceCard(tk.Canvas):
             text="\u203A",
             font=("Segoe UI Symbol", 16, "bold"),
             bg=self.surface_bg,
-            fg="#0f1115",
+            fg=W_CHEVRON_COLOR,
             anchor="e",
         )
         self.chevron_label.place(relx=1.0, x=-18, y=14, width=18, height=22)
@@ -71,7 +87,7 @@ class WorkspaceCard(tk.Canvas):
         self.meta_icon_labels = []
         for key, fallback in (("clock", "\U0001F551"), ("database", "\U0001F5C0"), ("file_stack", "\U0001F5CE")):
             photo = self.meta_icon_photos.get(key)
-            label = tk.Label(self.content, bg=self.surface_bg, fg="#111111", anchor="w")
+            label = tk.Label(self.content, bg=self.surface_bg, fg=W_META_COLOR, anchor="w")
             if photo is not None:
                 label.configure(image=photo)
                 label.image = photo
@@ -80,7 +96,7 @@ class WorkspaceCard(tk.Canvas):
             self.meta_icon_labels.append(label)
 
         self.meta_labels = [
-            tk.Label(self.content, text="", font=(self.font_family, 11), bg=self.surface_bg, fg="#111111", anchor="w")
+            tk.Label(self.content, text="", font=(self.font_family, 11), bg=self.surface_bg, fg=W_META_COLOR, anchor="w")
             for _ in range(3)
         ]
         meta_positions = (74, 106, 138)
@@ -230,12 +246,12 @@ class WorkspaceCard(tk.Canvas):
 
         width = max(260, self.winfo_width())
         hover_mix = min(1.0, self._hover_progress * 0.50 + self._select_progress * 0.35)
-        fill = self._blend(self.surface_bg, "#ffffff", hover_mix)
-        border = self._blend("#e6e8f1", "#d8dced", hover_mix)
-        shadow_a = self._blend("#ebeaf6", "#e3e1f2", hover_mix)
-        shadow_b = self._blend("#dfddeb", "#d8d6e8", hover_mix)
-        title_color = self._blend("#151933", "#0a0f24", self._select_progress * 0.45)
-        meta_color = self._blend("#111111", "#111111", self._select_progress * 0.35)
+        fill = self._blend(self.surface_bg, self.surface_hover_bg, hover_mix)
+        border = self._blend(W_CARD_BORDER, W_CARD_BORDER_HOVER, hover_mix)
+        shadow_a = self._blend(W_CARD_SHADOW_A, W_CARD_SHADOW_A, hover_mix)
+        shadow_b = self._blend(W_CARD_SHADOW_B, W_CARD_SHADOW_B, hover_mix)
+        title_color = self._blend(W_TITLE_COLOR, W_TITLE_COLOR_ACTIVE, self._select_progress * 0.45)
+        meta_color = self._blend(W_META_COLOR, W_META_COLOR, self._select_progress * 0.35)
 
         self._smooth_rounded_rect(6, 8, width - 2, height - 2, 24, fill=shadow_b, outline="", tags="card")
         self._smooth_rounded_rect(3, 5, width - 5, height - 5, 24, fill=shadow_a, outline="", tags="card")
@@ -248,11 +264,11 @@ class WorkspaceCard(tk.Canvas):
         self.tag_raise(self.content_id)
 
         self.content.configure(bg=fill)
-        self.folder_icon.configure(bg=fill, fg="#6ea7ff")
+        self.folder_icon.configure(bg=fill, fg=W_ICON_COLOR)
         self.title_label.configure(bg=fill, fg=title_color)
-        self.chevron_label.configure(bg=fill, fg="#0f1115")
+        self.chevron_label.configure(bg=fill, fg=W_CHEVRON_COLOR)
         for label in self.meta_icon_labels:
-            label.configure(bg=fill, fg="#111111")
+            label.configure(bg=fill, fg=W_META_COLOR)
         for label in self.meta_labels:
             label.configure(bg=fill, fg=meta_color)
 
@@ -274,10 +290,9 @@ class WorkspaceCard(tk.Canvas):
         self.meta_labels[0].configure(text=f"마지막 수정 날짜: {meta['last_modified']}")
         self.meta_labels[1].configure(text=f"워크스페이스 크기: {meta['size_text']}")
         self.meta_labels[2].configure(text=f"워크스페이스 파일 수: {meta['file_count']:,}개")
-
-
+        
 class WorkspaceStack(tk.Frame):
-    def __init__(self, parent, workspace_names, on_open=None, on_layout=None, bg="#ffffff", card_bg="#f8f9ff", meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
+    def __init__(self, parent, workspace_names, on_open=None, on_layout=None, bg=W_CARD_SURFACE, card_bg=W_CARD_SURFACE, card_hover_bg=W_CARD_SURFACE_HOVER, meta_icon_photos=None, folder_icon_photo=None, font_family="Segoe UI"):
         super().__init__(parent, bg=bg, bd=0, highlightthickness=0)
         self.configure(height=1)
         self.pack_propagate(False)
@@ -285,6 +300,7 @@ class WorkspaceStack(tk.Frame):
         self.on_open = on_open
         self.on_layout = on_layout
         self.card_bg = card_bg
+        self.card_hover_bg = card_hover_bg
         self.meta_icon_photos = meta_icon_photos or {}
         self.folder_icon_photo = folder_icon_photo
         self.font_family = font_family
@@ -308,6 +324,7 @@ class WorkspaceStack(tk.Frame):
                 on_select=self.select_workspace,
                 on_open=self._open_workspace,
                 surface_bg=self.card_bg,
+                surface_hover_bg=self.card_hover_bg,
                 meta_icon_photos=self.meta_icon_photos,
                 folder_icon_photo=self.folder_icon_photo,
                 font_family=self.font_family,

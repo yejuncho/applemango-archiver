@@ -102,6 +102,8 @@ from applemango_dms.ui.header_controls import (
     build_header_controls,
 )
 
+import applemango_dms.ui.colors as colors
+
 from applemango_dms.utils.windows import (
     apply_window_icon,
 )
@@ -109,7 +111,6 @@ from applemango_dms.utils.windows import (
 from applemango_dms.utils.images import (
     load_svg_photo,
 )
-
 class SequenceArchiverApp:
     def __init__(self):
         self.root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
@@ -555,7 +556,7 @@ class SequenceArchiverApp:
         if not dot_canvas.winfo_exists() or not label.winfo_exists():
             return
 
-        color = "#2ca24d" if connected else "#d23b3b"
+        color = colors.SUCCESS if connected else colors.FAILED
         dot_canvas.itemconfigure(dot_item, fill=color, outline=color)
         label.configure(text=text, fg="#8d90a6")
 

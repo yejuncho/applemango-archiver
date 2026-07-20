@@ -6,7 +6,6 @@ from applemango_dms.services.nas import (
     get_available_mapping_letters,
     normalize_drive_letter,
 )
-
 class WorkspaceManager:
     def map_workspace(self, workspace_name, username, password):
         normalized = str(workspace_name or '').strip()

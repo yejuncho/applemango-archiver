@@ -4,14 +4,12 @@ import subprocess
 from applemango_dms.config import credential_store_path, default_server_name
 from applemango_dms import state
 
-
 def _normalize_server_name(server_name):
     raw = str(server_name or "").strip()
     raw = raw.lstrip("\\")
     if "\\" in raw:
         raw = raw.split("\\", 1)[0]
     return raw
-
 
 def _wipe_server_connections(server_name):
     normalized = _normalize_server_name(server_name)
@@ -33,7 +31,6 @@ def _wipe_server_connections(server_name):
         encoding="cp949",
         errors="replace",
     )
-
 
 def _connect_ipc(username, password):
     login_cmd = ["net", "use", fr"{default_server_name}\IPC$", password, f"/user:{username}", "/persistent:no"]

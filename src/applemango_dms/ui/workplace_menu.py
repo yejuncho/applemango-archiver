@@ -4,8 +4,82 @@ from pathlib import Path
 
 import applemango_dms.state as state
 import applemango_dms.config as config
+from applemango_dms.ui import colors
+from applemango_dms.utils.images import load_svg_photo
+
+MENU_SURFACE = colors.SURFACE
+MENU_SURFACE_ALT = colors.SURFACE_ALT
+MENU_TEXT_INVERSE = colors.TEXT_INVERSE
+MENU_BORDER = colors.BORDER
+MENU_TEXT_PRIMARY = colors.TEXT_PRIMARY
+MENU_TEXT_SECONDARY = colors.TEXT_SECONDARY
+
+MENU_NAV_ACTIVE_BG = colors.PRIMARY_PRESSED
+MENU_NAV_HOVER_BG = colors.PRIMARY_HOVER
+MENU_NAV_CARD_BG = MENU_SURFACE_ALT
+MENU_NAV_ACTIVE_TEXT = MENU_TEXT_INVERSE
+MENU_NAV_ACTIVE_SUBTEXT = colors.TEXT_ON_PRIMARY_SOFT
+MENU_NAV_HOVER_TEXT = colors.TEXT_TINT_HOVER
+MENU_NAV_DEFAULT_TEXT = colors.TEXT_TINT
+
+MENU_STORAGE_BAR_BG = colors.PRIMARY
+MENU_STORAGE_USAGE_FILL = colors.PRIMARY
+
+MENU_EXIT_BUTTON_BG = colors.FAILED
+MENU_EXIT_BUTTON_ACTIVE_BG = colors.FAILED_HOVER
+
+def _directory_size_bytes(path_obj):
+    root = Path(path_obj)
+    if not root.exists():
+        return 0
+
+    total = 0
+    for node in root.rglob("*"):
+        try:
+            if node.is_file():
+                total += max(0, int(node.stat().st_size))
+        except Exception:
+            continue
+    return total
+
+def _load_workspace_icon(app, icon_key, filename, *, size=18):
+    icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "workspace"
+    photo = app.ui_icon_photos.get(icon_key)
+    if photo is None:
+        photo = load_svg_photo(icon_dir / filename, max_width=size, max_height=size)
+        if photo is not None:
+            app.ui_icon_photos[icon_key] = photo
+    return photo
+
+def _get_workspace_nav_icon_map(app):
+    return {
+        "save": {
+            "normal": app.ui_icon_photos.get("workspace_file_save") or _load_workspace_icon(app, "file_save_blue", "file_save_blue.svg"),
+            "active": app.ui_icon_photos.get("file_save_white") or _load_workspace_icon(app, "file_save_white", "file_save_white.svg"),
+        },
+        "search": {
+            "normal": app.ui_icon_photos.get("workspace_file_search") or _load_workspace_icon(app, "file_search_green", "file_search_green.svg"),
+            "active": app.ui_icon_photos.get("file_search_white") or _load_workspace_icon(app, "file_search_white", "file_search_white.svg"),
+        },
+        "exit": {
+            "normal": app.ui_icon_photos.get("workspace_exit") or _load_workspace_icon(app, "exit_red", "exit_red.svg"),
+            "active": app.ui_icon_photos.get("exit_white") or _load_workspace_icon(app, "exit_white", "exit_white.svg"),
+        },
+    }
 
 def _get_nas_storage_usage_bytes(app):
+    if state.is_demo_mode:
+        demo_root = app._get_demo_workspace_base_path()
+        active_workspace_root = app.get_workspace_root_path()
+
+        used_bytes = _directory_size_bytes(active_workspace_root) if active_workspace_root else 0
+        total_bytes = _directory_size_bytes(demo_root)
+
+        if total_bytes <= 0:
+            total_bytes = max(1, used_bytes)
+
+        return used_bytes, total_bytes
+
     candidates = []
     workspace_root = app.get_workspace_root_path()
     if workspace_root:
@@ -67,6 +141,7 @@ def _format_nas_usage_display(used_bytes, total_bytes):
 
 def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     rows = []
+    nav_icons = _get_workspace_nav_icon_map(app)
     nav_section = tk.Frame(parent, bg=parent.cget("bg"))
     nav_section.pack(fill="both", expand=True)
 
@@ -83,8 +158,8 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     def build_row(key, icon, title, desc, command, icon_fg, active_bg, is_last):
         is_active = key == active_key
         base_bg = parent.cget("bg")
-        hover_bg = "#ece9ff"
-        card_bg = active_bg if is_active else "#fdfefe"
+        hover_bg = MENU_NAV_HOVER_BG
+        card_bg = active_bg if is_active else MENU_NAV_CARD_BG
 
         outer = tk.Frame(nav_top, bg=base_bg)
         outer.pack(fill="x", pady=(0, 0 if is_last else card_gap_y))
@@ -108,26 +183,37 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             if mode == "active":
                 bg_color = active_bg
                 border = active_bg
-                icon_color = "#ffffff"
-                title_color = "#ffffff"
-                desc_color = "#f3f2ff"
+                icon_color = MENU_NAV_ACTIVE_TEXT
+                title_color = MENU_NAV_ACTIVE_TEXT
+                desc_color = MENU_NAV_ACTIVE_SUBTEXT
             elif mode == "hover":
                 bg_color = hover_bg
-                border = "#ffffff"
-                icon_color = icon_fg
-                title_color = "#2b3348"
-                desc_color = "#000000"
+                border = MENU_BORDER
+                icon_color = MENU_TEXT_INVERSE
+                title_color = MENU_TEXT_INVERSE
+                desc_color = MENU_TEXT_INVERSE
             else:
                 bg_color = card_bg
-                border = "#ffffff"
+                border = MENU_BORDER
                 icon_color = icon_fg
-                title_color = "#2d3448"
-                desc_color = "#000000"
+                title_color = MENU_NAV_DEFAULT_TEXT
+                desc_color = MENU_TEXT_PRIMARY
 
             card.delete("nav")
             width = max(180, card.winfo_width())
             app._smooth_rounded_rect(card, 1, 1, width - 1, 95, 20, fill=bg_color, outline=border, width=1, tags="nav")
-            icon_photo = (icon_photos or {}).get(key)
+            icon_photo_item = (icon_photos or {}).get(key)
+            use_active_icon = mode in ("hover", "active")
+            if isinstance(icon_photo_item, dict):
+                normal_icon = icon_photo_item.get("normal")
+                active_icon = icon_photo_item.get("active") or normal_icon
+                icon_photo = active_icon if use_active_icon else normal_icon
+            else:
+                mapped = nav_icons.get(key, {})
+                normal_icon = icon_photo_item or mapped.get("normal")
+                active_icon = mapped.get("active") or normal_icon
+                icon_photo = active_icon if use_active_icon else normal_icon
+
             if icon_photo is not None:
                 card.create_image(26, 30, image=icon_photo, anchor="center", tags="nav")
             else:
@@ -166,7 +252,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             desc,
             command,
             icon_fg,
-            active_bg="#8a82eb",
+            active_bg=MENU_NAV_ACTIVE_BG,
             is_last=(idx == total - 1),
         )
 
@@ -196,8 +282,8 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             width - 1,
             height - 1,
             20,
-            fill="#ffffff",
-            outline="#d9deea",
+            fill=MENU_SURFACE_ALT,
+            outline=MENU_BORDER,
             width=1,
             tags="usage",
         )
@@ -207,7 +293,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             storage_card.create_image(26, 30, image=storage_icon, anchor="center", tags="usage")
             title_x = 46
         else:
-            storage_card.create_text(26, 30, text="💽", font=("Segoe UI Emoji", 12), fill="#2d3448", anchor="center", tags="usage")
+            storage_card.create_text(26, 30, text="💽", font=("Segoe UI Emoji", 12), fill=MENU_NAV_DEFAULT_TEXT, anchor="center", tags="usage")
             title_x = 46
 
         storage_card.create_text(
@@ -215,13 +301,13 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             30,
             text="저장소 사용 현황",
             font=app._font(11, "bold"),
-            fill="#2d3448",
+            fill=MENU_NAV_DEFAULT_TEXT,
             anchor="w",
             tags="usage",
         )
 
-        bar_x1, bar_x2 = 12, width - 12
-        bar_y1, bar_y2 = 58, 66
+        bar_x1, bar_x2 = 15, width - 15
+        bar_y1, bar_y2 = 55, 65
         bar_radius = max(2, (bar_y2 - bar_y1) // 2)
         app._smooth_rounded_rect(
             storage_card,
@@ -230,7 +316,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
             bar_x2,
             bar_y2,
             bar_radius,
-            fill="#d7deea",
+            fill=MENU_STORAGE_BAR_BG,
             outline="",
             width=0,
             tags="usage",
@@ -238,8 +324,10 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
 
         ratio = max(0.0, min(1.0, usage_data["ratio"]))
         if ratio > 0:
-            fill_x2 = bar_x1 + max((bar_y2 - bar_y1), int((bar_x2 - bar_x1) * ratio))
+            fill_x2 = bar_x1 + int((bar_x2 - bar_x1) * ratio)
             fill_x2 = min(bar_x2, fill_x2)
+            if fill_x2 <= bar_x1:
+                fill_x2 = bar_x1 + 1
             app._smooth_rounded_rect(
                 storage_card,
                 bar_x1,
@@ -247,7 +335,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
                 fill_x2,
                 bar_y2,
                 bar_radius,
-                fill="#5555d5",
+                fill=MENU_STORAGE_USAGE_FILL,
                 outline="",
                 width=0,
                 tags="usage",
@@ -256,21 +344,21 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
         metrics_y = 82
         used_text = usage_data["used_text"]
         used_item = storage_card.create_text(
-            33,
+            42,
             metrics_y,
             text=used_text,
             font=app._font(9, "bold"),
-            fill="#5555d5",
+            fill=MENU_STORAGE_USAGE_FILL,
             tags="usage",
         )
         bbox = storage_card.bbox(used_item) or (12, metrics_y, 12, metrics_y)
-        right_x = bbox[2] + 4
+        right_x = bbox[2]
         storage_card.create_text(
             right_x,
             metrics_y,
             text=f" / {usage_data['total_text']} ({usage_data['percent_text']})",
             font=app._font(9),
-            fill="#2d3448",
+            fill=MENU_STORAGE_USAGE_FILL,
             anchor="w",
             tags="usage",
         )
@@ -296,29 +384,29 @@ def show_workspace_exit_screen(app):
         shell["sidebar"],
         "exit",
         [
-            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, "#2d6cdf"),
-            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, "#111111"),
-            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, "#d33e3e"),
+            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, colors.PRIMARY),
+            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, MENU_TEXT_PRIMARY),
+            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, colors.FAILED),
         ],
         icon_photos={
-            "save": app.ui_icon_photos.get("workspace_file_save"),
-            "search": app.ui_icon_photos.get("workspace_file_search"),
-            "exit": app.ui_icon_photos.get("workspace_exit"),
+            "save": app.ui_icon_photos.get("workspace_file_save") or app.ui_icon_photos.get("file_save_blue"),
+            "search": app.ui_icon_photos.get("workspace_file_search") or app.ui_icon_photos.get("file_search_green"),
+            "exit": app.ui_icon_photos.get("workspace_exit") or app.ui_icon_photos.get("exit_red"),
         },
     )
 
     outer = shell["content"]
     app._build_workspace_page_header(outer, "워크스페이스 나가기", "현재 작업을 마치고 워크스페이스 목록으로 돌아갑니다.")
 
-    action_row = tk.Frame(outer, bg="#ffffff")
+    action_row = tk.Frame(outer, bg=outer.cget("bg"))
     action_row.pack(fill="x", padx=20, pady=(4, 0))
     tk.Button(
         action_row,
         text="나가기",
         width=14,
-        bg="#d33e3e",
-        fg="white",
-        activebackground="#bf3232",
+        bg=MENU_EXIT_BUTTON_BG,
+        fg=MENU_TEXT_INVERSE,
+        activebackground=MENU_EXIT_BUTTON_ACTIVE_BG,
         relief="flat",
         bd=0,
         cursor="hand2",

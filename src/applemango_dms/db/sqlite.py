@@ -1,6 +1,5 @@
 import sqlite3
 from pathlib import Path
-
 class ArchiveDatabase:
     STATUS_ACTIVE = 'active'
     STATUS_DELETED = 'deleted'

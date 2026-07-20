@@ -1,7 +1,9 @@
 import tkinter as tk
+from applemango_dms.ui import colors
 
+HC_BG = colors.BACKGROUND
 
-def build_header_controls(app, parent, context, bg="#ffffff"):
+def build_header_controls(app, parent, context, bg=HC_BG):
     container = tk.Frame(parent, bg=bg, bd=0, highlightthickness=0)
 
     def make_icon_button(
@@ -141,6 +143,5 @@ def build_header_controls(app, parent, context, bg="#ffffff"):
 
     return container
 
-
-def build_window_controls(app, parent, bg="#ffffff"):
+def build_window_controls(app, parent, bg=HC_BG):
     return build_header_controls(app, parent, context="workspace", bg=bg)

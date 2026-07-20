@@ -18,6 +18,26 @@ from applemango_dms.services.nas import (
     check_local_network_connectivity,
 )
 
+from applemango_dms.ui import colors
+
+LOGIN_BG = colors.BACKGROUND
+LOGIN_PANEL_BG = colors.SURFACE
+LOGIN_FIELD_WRAPPER_BG = LOGIN_PANEL_BG
+LOGIN_FIELD_BG = colors.SURFACE_ALT
+LOGIN_TEXT_PRIMARY = colors.TEXT_PRIMARY
+LOGIN_TEXT_SECONDARY = colors.TEXT_SECONDARY
+LOGIN_BORDER = colors.BORDER
+LOGIN_FOCUS_BORDER = colors.PRIMARY_PRESSED
+LOGIN_INSERT_COLOR = colors.PRIMARY_PRESSED
+
+LOGIN_BUTTON_START = colors.PRIMARY
+LOGIN_BUTTON_END = colors.PRIMARY_HOVER
+LOGIN_BUTTON_HOVER_END = colors.PRIMARY_PRESSED
+LOGIN_BUTTON_BORDER = colors.PRIMARY_HOVER
+LOGIN_BUTTON_DISABLED_START = colors.BORDER
+LOGIN_BUTTON_DISABLED_END = colors.BORDER
+LOGIN_BUTTON_DISABLED_TEXT = colors.TEXT_INVERSE
+
 def _blend_hex(c1, c2, ratio):
     c1 = c1.lstrip("#")
     c2 = c2.lstrip("#")
@@ -70,7 +90,7 @@ def _draw_horizontal_gradient_rounded(canvas, x1, y1, x2, y2, radius, start_colo
 def prepare_login_layout(app):
     target_w = 420
     target_h = 560
-    login_bg_color = "#ffffff"
+    login_bg_color = LOGIN_BG
     app._center_window(target_w, target_h)
     app._apply_fullscreen_mode()
     app.root.title("애플망고 DMS - 로그인")
@@ -81,7 +101,12 @@ def prepare_login_layout(app):
     bg.pack(fill="both", expand=True)
     app.login_bg_canvas = bg
 
-    card_info = app.create_card(bg, height=494)
+    card_info = app.create_card(
+        bg,
+        height=494,
+        fill_top=LOGIN_PANEL_BG,
+        fill_bottom=LOGIN_PANEL_BG,
+    )
     content = card_info["content"]
     card_redraw = card_info["redraw"]
 
@@ -115,15 +140,15 @@ def toggle_password_visibility(app, entry_widget, field_state, eye_widget=None):
                 eye_widget.configure(text="\U0001f441")
 
 def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
-    wrapper = tk.Frame(parent, bg="#f9f8ff")
-    canvas = tk.Canvas(wrapper, height=52, bg="#f9f8ff", highlightthickness=0, bd=0)
+    wrapper = tk.Frame(parent, bg=LOGIN_FIELD_WRAPPER_BG)
+    canvas = tk.Canvas(wrapper, height=52, bg=LOGIN_FIELD_WRAPPER_BG, highlightthickness=0, bd=0)
     canvas.pack(fill="x")
 
-    inner = tk.Frame(canvas, bg="#ffffff")
+    inner = tk.Frame(canvas, bg=LOGIN_FIELD_BG)
     inner_id = canvas.create_window(10, 5, window=inner, anchor="nw", height=42)
 
     leading_icon = app.login_icon_photos.get(icon_key)
-    icon_label = tk.Label(inner, bg="#ffffff", fg="#868cab")
+    icon_label = tk.Label(inner, bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY)
     if leading_icon is not None:
         icon_label.configure(image=leading_icon)
         icon_label.image = leading_icon
@@ -141,9 +166,9 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
         bd=0,
         relief="flat",
         highlightthickness=0,
-        bg="#ffffff",
-        fg="#1d2138",
-        insertbackground="#06012a",
+        bg=LOGIN_FIELD_BG,
+        fg=LOGIN_TEXT_PRIMARY,
+        insertbackground=LOGIN_INSERT_COLOR,
         insertontime=600,
         insertofftime=400,
         insertwidth=2,
@@ -154,7 +179,7 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
     inner.bind("<Button-1>", lambda _e: entry.focus_set())
     icon_label.bind("<Button-1>", lambda _e: entry.focus_set())
 
-    placeholder_label = tk.Label(inner, text=placeholder, font=app._font(11), bg="#ffffff", fg="#a0a3b8")
+    placeholder_label = tk.Label(inner, text=placeholder, font=app._font(11), bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY)
     placeholder_label.place(x=42, y=9)
     placeholder_label.bind("<Button-1>", lambda _e: entry.focus_set())
 
@@ -166,7 +191,7 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
     eye_label = None
     if is_password:
         eye_icon = app.login_icon_photos.get("password_visible")
-        eye_label = tk.Label(inner, bg="#ffffff", fg="#8086a3", cursor="hand2")
+        eye_label = tk.Label(inner, bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY, cursor="hand2")
         if eye_icon is not None:
             eye_label.configure(image=eye_icon)
             eye_label.image = eye_icon
@@ -179,7 +204,7 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
         canvas.delete("field")
         w = max(40, canvas.winfo_width())
         h = max(40, canvas.winfo_height())
-        app._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill="#ffffff", outline="", width=0, tags="field")
+        app._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill=LOGIN_FIELD_BG, outline="", width=0, tags="field")
         app._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill="", outline=border_color, width=1, tags="field")
         canvas.tag_lower("field")
         canvas.itemconfigure(inner_id, width=max(10, w - 20))
@@ -192,20 +217,20 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
 
     def on_focus_in(_event):
         field_state["focused"] = True
-        redraw_field("#06012a")
+        redraw_field(LOGIN_FOCUS_BORDER)
         placeholder_label.place_forget()
 
     def on_focus_out(_event):
         field_state["focused"] = False
-        redraw_field("#e4e6f0")
+        redraw_field(LOGIN_BORDER)
         update_placeholder()
 
-    canvas.bind("<Configure>", lambda _e: redraw_field("#06012a" if field_state["focused"] else "#e4e6f0"))
+    canvas.bind("<Configure>", lambda _e: redraw_field(LOGIN_FOCUS_BORDER if field_state["focused"] else LOGIN_BORDER))
     entry.bind("<FocusIn>", on_focus_in)
     entry.bind("<FocusOut>", on_focus_out)
     value_var.trace_add("write", update_placeholder)
 
-    redraw_field("#e4e6f0")
+    redraw_field(LOGIN_BORDER)
     update_placeholder()
 
     return {
@@ -219,7 +244,7 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
     }
 
 def create_primary_login_button(app, parent, text, command):
-    canvas = tk.Canvas(parent, height=52, bg="#f9f8ff", highlightthickness=0, bd=0, cursor="arrow")
+    canvas = tk.Canvas(parent, height=52, bg=LOGIN_FIELD_WRAPPER_BG, highlightthickness=0, bd=0, cursor="arrow")
 
     state = {
         "enabled": False,
@@ -232,16 +257,16 @@ def create_primary_login_button(app, parent, text, command):
         h = max(52, canvas.winfo_height())
 
         if state["enabled"]:
-            start = "#06012a"
-            end = "#2a2559" if not state["hover"] else "#37306c"
-            border = "#19144a"
+            start = LOGIN_BUTTON_START
+            end = LOGIN_BUTTON_END if not state["hover"] else LOGIN_BUTTON_HOVER_END
+            border = LOGIN_BUTTON_BORDER
             text_color = "white"
             cursor = "hand2"
         else:
-            start = "#b8bdd1"
-            end = "#c5c9d9"
-            border = "#b8bdd1"
-            text_color = "#f6f7fb"
+            start = LOGIN_BUTTON_DISABLED_START
+            end = LOGIN_BUTTON_DISABLED_END
+            border = LOGIN_BORDER
+            text_color = LOGIN_BUTTON_DISABLED_TEXT
             cursor = "arrow"
 
         canvas.configure(cursor=cursor)
@@ -281,21 +306,21 @@ def show_login_screen(app, prefill_username=None):
     state.is_demo_mode = False
     prepare_login_layout(app)
 
-    frame = tk.Frame(app.login_content, bg="#ffffff")
+    frame = tk.Frame(app.login_content, bg=LOGIN_PANEL_BG)
     frame.pack(fill="both", expand=True)
 
     logo_photo = app._load_random_login_logo_photo(max_width=280, max_height=100)
     app.logo_image = logo_photo
     if logo_photo is not None:
-        tk.Label(frame, image=logo_photo, bg="#ffffff").pack(pady=(0, 8))
+        tk.Label(frame, image=logo_photo, bg=LOGIN_PANEL_BG).pack(pady=(0, 8))
     else:
-        tk.Label(frame, text="애플망고", font=app._font(25, "bold"), fg="#06012a", bg="#ffffff").pack(pady=(0, 0))
+        tk.Label(frame, text="애플망고", font=app._font(25, "bold"), fg=LOGIN_FOCUS_BORDER, bg=LOGIN_PANEL_BG).pack(pady=(0, 0))
 
-    tk.Label(frame, text="DMS - 데이터 관리 시스템", font=app._font(12, "bold"), fg="#06012a", bg="#ffffff").pack(pady=(0, 25))
+    tk.Label(frame, text="DMS - 데이터 관리 시스템", font=app._font(12, "bold"), fg=LOGIN_TEXT_PRIMARY, bg=LOGIN_PANEL_BG).pack(pady=(0, 25))
 
     username_field = create_rounded_entry(app, frame, "사용자명", "username", is_password=False)
     username_field["wrapper"].pack(fill="x")
-    tk.Frame(frame, bg="#ffffff", height=10).pack(fill="x")
+    tk.Frame(frame, bg=LOGIN_PANEL_BG, height=10).pack(fill="x")
 
     password_field = create_rounded_entry(app, frame, "비밀번호", "password", is_password=True)
     password_field["wrapper"].pack(fill="x")
@@ -322,10 +347,10 @@ def show_login_screen(app, prefill_username=None):
                 parent,
                 text=text,
                 variable=variable,
-                bg="#ffffff",
-                activebackground="#ffffff",
-                fg="#3f4563",
-                selectcolor="#ffffff",
+                bg=LOGIN_PANEL_BG,
+                activebackground=LOGIN_PANEL_BG,
+                fg=LOGIN_TEXT_SECONDARY,
+                selectcolor=LOGIN_PANEL_BG,
                 font=app._font(font_size),
                 relief="flat",
                 bd=0,
@@ -334,13 +359,13 @@ def show_login_screen(app, prefill_username=None):
             ).pack(side="left")
             return
 
-        wrapper = tk.Frame(parent, bg="#ffffff", cursor="hand2")
+        wrapper = tk.Frame(parent, bg=LOGIN_PANEL_BG, cursor="hand2")
         wrapper.pack(side="left")
 
         icon_label = tk.Label(
             wrapper,
             image=checked_icon if variable.get() else unchecked_icon,
-            bg="#ffffff",
+            bg=LOGIN_PANEL_BG,
             bd=0,
             highlightthickness=0,
             cursor="hand2",
@@ -351,8 +376,8 @@ def show_login_screen(app, prefill_username=None):
             wrapper,
             text=text,
             font=app._font(font_size),
-            fg="#3f4563",
-            bg="#ffffff",
+            fg=LOGIN_TEXT_SECONDARY,
+            bg=LOGIN_PANEL_BG,
             cursor="hand2",
         )
         text_label.pack(side="left")
@@ -370,11 +395,11 @@ def show_login_screen(app, prefill_username=None):
             widget.bind("<Button-1>", toggle)
 
         sync_icon()
-    remember_row = tk.Frame(frame, bg="#ffffff")
+    remember_row = tk.Frame(frame, bg=LOGIN_PANEL_BG)
     remember_row.pack(fill="x", pady=(12, 2))
     create_login_checkbox(remember_row, "로그인 정보 저장", remember_var, font_size=10)
 
-    demo_mode_row = tk.Frame(frame, bg="#ffffff")
+    demo_mode_row = tk.Frame(frame, bg=LOGIN_PANEL_BG)
     demo_mode_row.pack(fill="x", pady=(0, 16))
     create_login_checkbox(demo_mode_row, "로컬 데모 모드 (NAS 없이 실행)", demo_mode_var, font_size=9)
 
@@ -464,22 +489,22 @@ def show_login_screen(app, prefill_username=None):
     login_btn = create_primary_login_button(app, frame, "로그인", submit_login)
     login_btn.pack(fill="x")
 
-    connectivity_row = tk.Frame(frame, bg="#ffffff")
+    connectivity_row = tk.Frame(frame, bg=LOGIN_PANEL_BG)
     connectivity_row.pack(fill="x", pady=(14, 0), side="bottom")
     
-    connectivity_center = tk.Frame(connectivity_row, bg="#ffffff")
+    connectivity_center = tk.Frame(connectivity_row, bg=LOGIN_PANEL_BG)
     connectivity_center.pack(anchor="center")
 
-    dot_canvas = tk.Canvas(connectivity_center, width=10, height=10, bg="#ffffff", highlightthickness=0, bd=0)
-    dot_item = dot_canvas.create_oval(1, 1, 9, 9, fill="#d23b3b", outline="#d23b3b")
+    dot_canvas = tk.Canvas(connectivity_center, width=10, height=10, bg=LOGIN_PANEL_BG, highlightthickness=0, bd=0)
+    dot_item = dot_canvas.create_oval(1, 1, 9, 9, fill=colors.FAILED, outline=colors.FAILED)
     dot_canvas.pack(side="left", pady=(0, 1))
 
     status_label = tk.Label(
         connectivity_center,
         text="NAS 연결 불가",
         font=app._font(9),
-        fg="#8d90a6",
-        bg="#ffffff",
+        fg=LOGIN_TEXT_SECONDARY,
+        bg=LOGIN_PANEL_BG,
         anchor="w",
     )
     status_label.pack(side="left", padx=(6, 0))
