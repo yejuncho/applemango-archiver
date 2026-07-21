@@ -453,18 +453,25 @@ def show_save_files_screen(app):
             )
 
             text_x = render_width // 2
+            label_text = str(text or "").strip()
             if icon_photo is not None:
-                icon_x = max(12, render_width // 2 - 30) + icon_offset_x
-                button_canvas.create_image(icon_x, render_height // 2, image=icon_photo, anchor="center")
-                text_x = icon_x + 12 + text_offset_x
-                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="w")
+                if label_text:
+                    icon_x = max(12, render_width // 2 - 30) + icon_offset_x
+                    button_canvas.create_image(icon_x, render_height // 2, image=icon_photo, anchor="center")
+                    text_x = icon_x + 12 + text_offset_x
+                    button_canvas.create_text(text_x, render_height // 2, text=label_text, fill=text_color, font=app._font(11, "bold"), anchor="w")
+                else:
+                    button_canvas.create_image(render_width // 2, render_height // 2, image=icon_photo, anchor="center")
             elif icon_fallback_text:
-                icon_x = max(12, render_width // 2 - 30) + icon_offset_x
-                button_canvas.create_text(icon_x, render_height // 2, text=icon_fallback_text, fill=text_color, font=("Segoe UI Emoji", 13), anchor="center")
-                text_x = icon_x + 12 + text_offset_x
-                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="w")
+                if label_text:
+                    icon_x = max(12, render_width // 2 - 30) + icon_offset_x
+                    button_canvas.create_text(icon_x, render_height // 2, text=icon_fallback_text, fill=text_color, font=("Segoe UI Emoji", 13), anchor="center")
+                    text_x = icon_x + 12 + text_offset_x
+                    button_canvas.create_text(text_x, render_height // 2, text=label_text, fill=text_color, font=app._font(11, "bold"), anchor="w")
+                else:
+                    button_canvas.create_text(render_width // 2, render_height // 2, text=icon_fallback_text, fill=text_color, font=("Segoe UI Emoji", 13), anchor="center")
             else:
-                button_canvas.create_text(text_x, render_height // 2, text=text, fill=text_color, font=app._font(11, "bold"), anchor="center")
+                button_canvas.create_text(text_x, render_height // 2, text=label_text, fill=text_color, font=app._font(11, "bold"), anchor="center")
 
             def set_button_overrides(*, fill_override=None, outline_override=None):
                 button_canvas.override_fill = fill_override
@@ -536,6 +543,9 @@ def show_save_files_screen(app):
     row1_height = row_heights[0]
     row1_center_y = inner_y1 + row1_height // 2
     row1_inner_width = max(80, inner_x2 - inner_x1 - 20)
+    row1_window_height = max(40, row1_height - 8)
+    row1_nudge_up = 5
+    row1_element_vpad = max(0, ((row1_window_height - 36) // 2) - row1_nudge_up)
     row1_frame = tk.Frame(detail_card, bg=row_colors[0])
     detail_card.create_window(
         inner_x1 + 10,
@@ -543,68 +553,240 @@ def show_save_files_screen(app):
         window=row1_frame,
         anchor="w",
         width=row1_inner_width,
-        height=max(28, row1_height - 8),
+        height=row1_window_height,
     )
 
+    row1_title_width = 205
+    row1_frame.grid_rowconfigure(0, minsize=row1_window_height)
+    row1_frame.grid_columnconfigure(0, minsize=row1_title_width, weight=0)
+    row1_frame.grid_columnconfigure(1, weight=0)
+    row1_frame.grid_columnconfigure(2, weight=0)
+    row1_frame.grid_columnconfigure(3, weight=1)
+    row1_frame.grid_columnconfigure(4, weight=0)
+
+    row1_title_slot = tk.Frame(row1_frame, bg=row_colors[0], width=row1_title_width, height=row1_window_height)
+    row1_title_slot.grid(row=0, column=0, sticky="w")
+    row1_title_slot.pack_propagate(False)
+
     title_label = tk.Label(
-        row1_frame,
+        row1_title_slot,
         textvariable=pending_count_var,
         bg=row_colors[0],
         fg="#1f2b4a",
-        font=app._font(12, "bold"),
+        font=app._font(14, "bold"),
         anchor="w",
     )
-    title_label.pack(side="left")
+    title_label.place(x=0, rely=0.5, anchor="w")
+
+    row1_icon_size = 22
+    row1_icon_gap = 4
+    row1_icon_padding = (7, 7)
+
+    def create_icon_action(parent, icon_photo, fallback_text, command, *, hover_bg="#eef2fb", fg="#111111"):
+        wrapper = tk.Frame(parent, bg=row_colors[0], bd=0, highlightthickness=0)
+        label = tk.Label(
+            wrapper,
+            image=icon_photo,
+            text=fallback_text if icon_photo is None else "",
+            bg=row_colors[0],
+            fg=fg,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        label.pack(padx=row1_icon_padding[0], pady=row1_icon_padding[1])
+
+        def set_state(active_bg):
+            wrapper.configure(bg=active_bg)
+            label.configure(bg=active_bg)
+
+        def on_enter(_event=None):
+            set_state(hover_bg)
+
+        def on_leave(_event=None):
+            set_state(row_colors[0])
+
+        def activate(_event=None):
+            command()
+
+        for widget in (wrapper, label):
+            widget.bind("<Button-1>", activate, add="+")
+            widget.bind("<Enter>", on_enter, add="+")
+            widget.bind("<Leave>", on_leave, add="+")
+
+        wrapper.image = icon_photo
+        set_state(row_colors[0])
+        return wrapper
 
     add_actions = tk.Frame(row1_frame, bg=row_colors[0])
-    add_actions.pack(side="left", padx=(10, 0))
+    add_actions.grid(row=0, column=1, sticky="w", padx=(10, 0))
 
-    add_file_btn = create_rounded_action(
+    row1_manage_actions = tk.Frame(row1_frame, bg=row_colors[0])
+    row1_manage_actions.grid(row=0, column=2, sticky="w", padx=(row1_icon_gap, 0))
+
+    add_file_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "file_add.svg",
+        max_width=row1_icon_size,
+        max_height=row1_icon_size,
+        tint="#111111",
+    )
+    add_folder_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "folder_add.svg",
+        max_width=row1_icon_size,
+        max_height=row1_icon_size,
+        tint="#111111",
+    )
+    file_settings_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "file_settings.svg",
+        max_width=row1_icon_size,
+        max_height=row1_icon_size,
+        tint="#111111",
+    )
+    trash_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "trash.svg",
+        max_width=row1_icon_size,
+        max_height=row1_icon_size,
+        tint="#111111",
+    )
+    reset_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "reset.svg",
+        max_width=row1_icon_size,
+        max_height=row1_icon_size,
+        tint="#111111",
+    )
+
+    def open_file_settings_window():
+        popup = getattr(app, "_save_files_settings_popup", None)
+        if popup is not None and popup.winfo_exists():
+            popup.lift()
+            popup.focus_force()
+            return
+
+        hidden_right_card = right_card
+
+        popup = tk.Toplevel(app.root)
+        popup.title("선택한 파일 설정")
+        popup.configure(bg="#ffffff")
+        popup.geometry("400x450")
+        popup.minsize(240, 320)
+        popup.transient(app.root)
+
+        popup_page = tk.Frame(popup, bg="#ffffff", padx=4, pady=4)
+        popup_page.pack(fill="both", expand=True)
+
+        popup_shell = tk.Canvas(popup_page, bg="#ffffff", highlightthickness=0, bd=0)
+        popup_shell.pack(fill="both", expand=True)
+
+        popup_card = tk.Canvas(popup_shell, bg="#ffffff", highlightthickness=0, bd=0)
+        popup_card_window_id = popup_shell.create_window(0, 0, window=popup_card, anchor="nw")
+
+        app._save_files_settings_popup = popup
+        app._save_files_settings_popup_card = popup_card
+
+        def on_popup_close():
+            nonlocal right_card
+            right_card = hidden_right_card
+            app._save_files_settings_popup_card = None
+            try:
+                if popup.winfo_exists():
+                    popup.destroy()
+            except Exception:
+                pass
+            app._save_files_settings_popup = None
+            draw_right_card()
+
+        popup.protocol("WM_DELETE_WINDOW", on_popup_close)
+
+        popup_redraw_state = {"job": None}
+
+        def redraw_popup_shell_and_card():
+            popup_redraw_state["job"] = None
+            if not popup.winfo_exists():
+                return
+
+            shell_width = max(1, popup_shell.winfo_width())
+            shell_height = max(1, popup_shell.winfo_height())
+            if shell_width <= 10 or shell_height <= 10:
+                popup_redraw_state["job"] = popup.after(20, redraw_popup_shell_and_card)
+                return
+
+            left_inset = 4
+            right_inset = 4
+            top_inset = 4
+            bottom_inset = 4
+            available_width = max(80, shell_width - left_inset - right_inset)
+            available_height = max(120, shell_height - top_inset - bottom_inset)
+
+            # Keep consistent edge spacing on all sides and use full usable height.
+            card_width = available_width
+            card_height = int(available_height)
+            card_x = left_inset
+            card_y = top_inset
+
+            popup_shell.coords(popup_card_window_id, card_x, card_y)
+            popup_shell.itemconfigure(
+                popup_card_window_id,
+                width=card_width,
+                height=card_height,
+            )
+            popup_card.configure(width=card_width, height=card_height)
+            popup_card._forced_draw_width = card_width
+            popup_card._forced_draw_height = card_height
+
+            nonlocal right_card
+            right_card = popup_card
+            draw_right_card()
+
+        def schedule_popup_redraw(_event=None):
+            job = popup_redraw_state.get("job")
+            if job is not None:
+                try:
+                    popup.after_cancel(job)
+                except Exception:
+                    pass
+            popup_redraw_state["job"] = popup.after(20, redraw_popup_shell_and_card)
+
+        popup_shell.bind("<Configure>", schedule_popup_redraw, add="+")
+        popup.after_idle(schedule_popup_redraw)
+        popup.after(80, schedule_popup_redraw)
+
+    add_file_btn = create_icon_action(
         add_actions,
-        "파일 추가",
+        add_file_icon,
+        "+",
         pick_files,
-        width=96,
-        height=30,
-        fill="#ffffff",
-        outline="#d9deea",
-        text_color="#2d3448",
     )
     add_file_btn.pack(side="left")
 
-    add_folder_btn = create_rounded_action(
+    add_folder_btn = create_icon_action(
         add_actions,
-        "폴더 추가",
+        add_folder_icon,
+        "+",
         pick_folder,
-        width=96,
-        height=30,
-        fill="#ffffff",
-        outline="#d9deea",
-        text_color="#2d3448",
     )
-    add_folder_btn.pack(side="left", padx=(8, 0))
+    add_folder_btn.pack(side="left", padx=(row1_icon_gap, 0))
 
-    center_actions = tk.Frame(row1_frame, bg=row_colors[0])
+    file_settings_btn = create_icon_action(
+        row1_manage_actions,
+        file_settings_icon,
+        "S",
+        open_file_settings_window,
+    )
 
-    remove_btn = create_rounded_action(
-        center_actions,
-        "선택 삭제",
+    remove_btn = create_icon_action(
+        row1_manage_actions,
+        trash_icon,
+        "T",
         remove_selected_placeholder,
-        width=80,
-        height=30,
-        fill="#ffffff",
-        outline="#d9deea",
-        text_color="#2d3448",
+        hover_bg="#fff1f1",
     )
 
-    clear_btn = create_rounded_action(
-        center_actions,
-        "전체 초기화",
+    clear_btn = create_icon_action(
+        row1_manage_actions,
+        reset_icon,
+        "R",
         clear_all_files,
-        width=100,
-        height=30,
-        fill="#ffffff",
-        outline="#d9deea",
-        text_color="#2d3448",
     )
 
     upload_icon = load_svg_photo(
@@ -670,23 +852,21 @@ def show_save_files_screen(app):
         has_files = bool(selected_files)
         has_selected_files = has_files and any(path in selected_row_keys for path in selected_files)
 
+        file_settings_btn.pack_forget()
         remove_btn.pack_forget()
         clear_btn.pack_forget()
-        upload_btn.pack_forget()
-        center_actions.pack_forget()
+        upload_btn.grid_remove()
         stop_upload_button_glow()
 
         if not has_files:
             return
 
-        center_actions.pack(side="left", padx=(10, 10))
+        file_settings_btn.pack(side="left")
+        clear_btn.pack(side="left", padx=(row1_icon_gap, 0))
         if has_selected_files:
-            remove_btn.pack(side="left")
-            clear_btn.pack(side="left", padx=(8, 0))
-            upload_btn.pack(side="right")
+            remove_btn.pack(side="left", padx=(row1_icon_gap, 0))
+            upload_btn.grid(row=0, column=4, sticky="e")
             ensure_upload_button_glow_running()
-        else:
-            clear_btn.pack(side="left")
 
     update_action_buttons_visibility()
 
@@ -740,9 +920,17 @@ def show_save_files_screen(app):
         max_width=14,
         max_height=14,
     )
+    empty_cloud_icon_width = 92
+    empty_cloud_icon_height = 92
+    empty_cloud_upload_icon = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "cloud_upload.svg",
+        max_width=empty_cloud_icon_width,
+        max_height=empty_cloud_icon_height,
+    )
     detail_card.unchecked_icon_ref = unchecked_icon
     detail_card.checked_icon_ref = checked_icon
     detail_card.checked_white_icon_ref = checked_white_icon
+    detail_card.empty_cloud_upload_icon_ref = empty_cloud_upload_icon
 
     file_icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "file_formats"
     file_format_icons = {
@@ -783,7 +971,7 @@ def show_save_files_screen(app):
             row2_center_y,
             text="□",
             fill="#000000",
-            font=app._font(10, "bold"),
+            font=app._font(12, "bold"),
             anchor="center",
             tags=("row2_select_toggle",),
         )
@@ -834,7 +1022,7 @@ def show_save_files_screen(app):
             row2_center_y,
             text=header_text,
             fill="#000000",
-            font=app._font(10),
+            font=app._font(12),
             anchor="center",
         )
 
@@ -874,7 +1062,7 @@ def show_save_files_screen(app):
         local_col_centers.append(local_cursor + (width_px / 2.0))
         local_cursor += width_px
 
-    table_row_height = 34
+    table_row_height = int(round(34 * 1.15))
     font_measure_cache = {}
     current_year = time.localtime().tm_year
     row_combo_style_name = "SaveFilesRow.TCombobox"
@@ -1170,7 +1358,7 @@ def show_save_files_screen(app):
             row4_center_y,
             text="전체 진행률",
             fill="#1f2b4a",
-            font=app._font(10, "bold"),
+            font=app._font(12, "bold"),
             anchor="w",
             tags=("row4_summary",),
         )
@@ -1182,7 +1370,7 @@ def show_save_files_screen(app):
             row4_center_y,
             text=in_progress_text,
             fill="#2d3448",
-            font=app._font(10),
+            font=app._font(12),
             anchor="w",
             tags=("row4_summary",),
         )
@@ -1227,7 +1415,7 @@ def show_save_files_screen(app):
             row4_center_y,
             text=progress_pct_text,
             fill="#2d3448",
-            font=app._font(9, "bold"),
+            font=app._font(11, "bold"),
             anchor="w",
             tags=("row4_summary",),
         )
@@ -1244,7 +1432,7 @@ def show_save_files_screen(app):
             row4_center_y,
             text=right_text,
             fill="#2d3448",
-            font=app._font(10),
+            font=app._font(12),
             anchor="e",
             tags=("row4_summary",),
         )
@@ -1418,8 +1606,16 @@ def show_save_files_screen(app):
     def draw_right_card():
         right_card.delete("all")
         app._save_files_active_right_card = right_card
-        right_width = min(245, right_card.winfo_width())
-        right_height = min(400, right_card.winfo_height())
+        popup_card_canvas = getattr(app, "_save_files_settings_popup_card", None)
+        popup_mode = popup_card_canvas is not None and right_card == popup_card_canvas
+        if popup_mode:
+            forced_width = int(getattr(right_card, "_forced_draw_width", 0) or 0)
+            forced_height = int(getattr(right_card, "_forced_draw_height", 0) or 0)
+            right_width = max(1, forced_width, right_card.winfo_width())
+            right_height = max(1, forced_height, right_card.winfo_height())
+        else:
+            right_width = min(245, right_card.winfo_width())
+            right_height = min(400, right_card.winfo_height())
 
         # Keep spacing deterministic as more right-card controls are added.
         card_pad_x = 12
@@ -1466,7 +1662,8 @@ def show_save_files_screen(app):
 
         date_field_x1 = card_pad_x
         date_field_y1 = date_label_y + label_to_field_gap
-        date_field_width = max(120, right_width - (card_pad_x * 2))
+        available_field_width = max(120, right_width - (card_pad_x * 2))
+        date_field_width = available_field_width
         date_field_x2 = date_field_x1 + date_field_width
         date_field_y2 = date_field_y1 + field_height
         right_card.date_field_bounds = (date_field_x1, date_field_y1, date_field_x2, date_field_y2)
@@ -1562,6 +1759,8 @@ def show_save_files_screen(app):
         doc_field_x1 = card_pad_x
         doc_field_y1 = doc_label_y + label_to_field_gap
         doc_field_width = date_field_width
+        if popup_mode:
+            doc_field_x1 = date_field_x1
         doc_field_x2 = doc_field_x1 + doc_field_width
         doc_field_y2 = doc_field_y1 + field_height
         right_card.doc_field_bounds = (doc_field_x1, doc_field_y1, doc_field_x2, doc_field_y2)
@@ -1739,6 +1938,8 @@ def show_save_files_screen(app):
         tag_field_x1 = card_pad_x
         tag_field_y1 = tag_label_y + label_to_field_gap
         tag_field_width = date_field_width
+        if popup_mode:
+            tag_field_x1 = date_field_x1
         tag_field_x2 = tag_field_x1 + tag_field_width
         tag_field_y2 = tag_field_y1 + field_height
         right_card.tag_field_bounds = (tag_field_x1, tag_field_y1, tag_field_x2, tag_field_y2)
@@ -1847,9 +2048,12 @@ def show_save_files_screen(app):
             outline="#5555d5",
             text_color="#ffffff",
         )
+        # Keep button placement in the same fixed vertical flow as date/type/tag sections.
+        apply_button_gap = 52
+        apply_button_y = tag_field_y2 + apply_button_gap
         right_card.create_window(
             right_width / 2.0,
-            max(0, right_height - 30),
+            apply_button_y,
             window=apply_button,
             anchor="center",
         )
@@ -1992,24 +2196,52 @@ def show_save_files_screen(app):
         rows = get_row_data()
 
         if not rows:
+            empty_state_height = max(220, row3_height)
             empty_canvas = tk.Canvas(
                 row3_body,
                 width=row2_inner_width,
-                height=max(56, table_row_height),
+                height=empty_state_height,
                 bg=row_colors[2],
                 highlightthickness=0,
                 bd=0,
+                cursor="arrow",
             )
-            empty_canvas.pack(fill="x")
+            empty_canvas.pack(fill="both", expand=True)
             bind_row3_scroll_gestures(empty_canvas)
+            icon_center_x = row2_inner_width / 2.0
+            icon_center_y = max(66, (empty_state_height / 2.0) - 18)
+            if empty_cloud_upload_icon is not None:
+                empty_canvas.create_image(
+                    icon_center_x,
+                    icon_center_y,
+                    image=empty_cloud_upload_icon,
+                    anchor="center",
+                    tags=("empty_upload_icon",),
+                )
+            else:
+                empty_canvas.create_text(
+                    icon_center_x,
+                    icon_center_y,
+                    text="☁",
+                    fill="#5c667f",
+                    font=("Segoe UI Emoji", 42),
+                    anchor="center",
+                    tags=("empty_upload_icon",),
+                )
+
             empty_canvas.create_text(
-                row2_inner_width / 2.0,
-                max(56, table_row_height) / 2.0,
-                text="클라우드 아이콘을 눌러 파일/폴더를 추가하세요.",
+                icon_center_x,
+                icon_center_y + max(52, (empty_cloud_icon_height // 2) + 18),
+                text="클라우드 아이콘을 눌러 파일을 추가할 수 있어요",
                 fill="#6b7280",
-                font=app._font(10),
+                font=app._font(12),
                 anchor="center",
+                tags=("empty_upload_text",),
             )
+
+            empty_canvas.tag_bind("empty_upload_icon", "<Button-1>", lambda _event: pick_files())
+            empty_canvas.tag_bind("empty_upload_icon", "<Enter>", lambda _event: empty_canvas.configure(cursor="hand2"))
+            empty_canvas.tag_bind("empty_upload_icon", "<Leave>", lambda _event: empty_canvas.configure(cursor="arrow"))
 
         for row_values in rows:
             row_selected = bool(row_values["checked"])
@@ -2078,7 +2310,7 @@ def show_save_files_screen(app):
                     table_row_height // 2,
                     text="☑" if row_values["checked"] else "□",
                     fill=row_name_text_color,
-                    font=app._font(10, "bold"),
+                    font=app._font(12, "bold"),
                     anchor="center",
                     tags=("row_item_toggle",),
                 )
@@ -2114,7 +2346,7 @@ def show_save_files_screen(app):
                 table_row_height // 2,
                 text=col2_text_value,
                 fill=row_name_text_color,
-                font=app._font(9),
+                font=app._font(11),
                 anchor="w",
             )
 
@@ -2123,7 +2355,7 @@ def show_save_files_screen(app):
             date_entry = tk.Entry(
                 row_canvas,
                 textvariable=date_var,
-                font=app._font(9),
+                font=app._font(11),
                 justify="center",
                 bd=0,
                 relief="flat",
@@ -2159,7 +2391,7 @@ def show_save_files_screen(app):
                 state="readonly",
                 style=row_combo_style_name,
                 justify="center",
-                font=app._font(8),
+                font=app._font(10),
             )
             doc_combo.configure(width=max(6, int((doc_col_width - 10) / 11)))
 
@@ -2180,7 +2412,7 @@ def show_save_files_screen(app):
             tag_entry = tk.Entry(
                 row_canvas,
                 textvariable=tag_var,
-                font=app._font(9),
+                font=app._font(11),
                 justify="left",
                 bd=0,
                 relief="flat",
@@ -2206,10 +2438,10 @@ def show_save_files_screen(app):
                 anchor="center",
             )
 
-            row_canvas.create_text(local_col_centers[5], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(9), anchor="center")
+            row_canvas.create_text(local_col_centers[5], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(11), anchor="center")
 
             status_text, status_color = get_status_display(row_values.get("status_code"))
-            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=status_text, fill=status_color, font=app._font(9, "bold"), anchor="center")
+            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=status_text, fill=status_color, font=app._font(11, "bold"), anchor="center")
 
             progress_ratio = max(0.0, min(1.0, float(row_values.get("progress_ratio", 0.0))))
             progress_col_left = col_starts[7] - row2_inner_x1
@@ -2258,7 +2490,7 @@ def show_save_files_screen(app):
                 table_row_height // 2,
                 text=progress_pct_text,
                 fill=row_primary_text_color,
-                font=app._font(8, "bold"),
+                font=app._font(10, "bold"),
                 anchor="e",
             )
 

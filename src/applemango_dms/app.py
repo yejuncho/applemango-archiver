@@ -503,7 +503,6 @@ class SequenceArchiverApp:
             "workspace_file_search": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_search_green.svg", 18, 18, None),
             "workspace_exit": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "exit_red.svg", 18, 18, None),
             "workspace_storage": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "storage.svg", 18, 18, None),
-            "workspace_cloud_save": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "cloud_save_blue.svg", 80, 80, None),
         }
 
         photos = {}
