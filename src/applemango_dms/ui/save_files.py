@@ -46,7 +46,7 @@ def show_save_files_screen(app):
     )
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 저장", "파일을 드래그 앤 드롭하거나, 아래 버튼을 클릭하여 파일을 선택하세요.")
+    app._build_workspace_page_header(outer, "파일 저장", "아래 버튼을 클릭하여 파일 또는 폴더를 선택하세요.")
 
     board = tk.Frame(outer, bg="#ffffff", highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)
@@ -86,39 +86,21 @@ def show_save_files_screen(app):
     split = tk.Frame(board, bg="#ffffff")
     split.pack(fill="both", expand=True, padx=10, pady=0)
     split.grid_anchor("nw")
-    split.grid_columnconfigure(0, weight=0)
-    split.grid_columnconfigure(1, weight=0)
-    split.grid_columnconfigure(2, weight=1)
+    split.grid_columnconfigure(0, weight=1)
     split.grid_rowconfigure(0, weight=1)
 
     left_col = tk.Frame(split, bg="#ffffff")
     left_col.grid(row=0, column=0, sticky="nsew")
-    right_col = tk.Frame(split, bg="#ffffff")
-    right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-    right_col.grid_columnconfigure(0, weight=1)
-    right_top_weight = 7
-    right_bottom_weight = 3
-    right_col.grid_rowconfigure(0, weight=right_top_weight)
-    right_col.grid_rowconfigure(1, weight=right_bottom_weight)
+    left_col.grid_rowconfigure(0, weight=1)
+    left_col.grid_columnconfigure(0, weight=1)
 
-    right_top_slot = tk.Frame(right_col, bg="#ffffff")
-    right_top_slot.grid(row=0, column=0, sticky="nsew")
-    right_top_slot.pack_propagate(False)
+    detail_card = tk.Canvas(left_col, bg="#ffffff", highlightthickness=0, bd=0)
+    detail_card.grid(row=0, column=0, sticky="nsew")
 
-    right_bottom_slot = tk.Frame(right_col, bg="#ffffff")
-    right_bottom_slot.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-    right_bottom_slot.pack_propagate(False)
-
-    drop_area = tk.Canvas(left_col, height=102, bg="#ffffff", highlightthickness=0, bd=0)
-    drop_area.pack(fill="x")
-    left_detail_card = tk.Canvas(left_col, height=500, bg="#ffffff", highlightthickness=0, bd=0)
-    left_detail_card.pack(fill="x", pady=10)
-    tk.Frame(left_col, bg="#ffffff").pack(fill="both", expand=True)
-
-    right_card = tk.Canvas(right_top_slot, bg="#ffffff", highlightthickness=0, bd=0)
-    right_card.pack(fill="both", expand=True)
-    right_bottom_card = tk.Canvas(right_bottom_slot, bg="#ffffff", highlightthickness=0, bd=0)
-    right_bottom_card.pack(fill="both", expand=True)
+    # Keep right-side canvases alive for future popup/window reuse,
+    # but do not place them in the current single-column layout.
+    right_card = tk.Canvas(split, bg="#ffffff", highlightthickness=0, bd=0)
+    right_bottom_card = tk.Canvas(split, bg="#ffffff", highlightthickness=0, bd=0)
 
     def add_file_paths(paths):
         normalized = []
@@ -498,104 +480,16 @@ def show_save_files_screen(app):
         draw("normal")
         return button_canvas
 
-    def handle_drop(event):
-        dropped = app.root.tk.splitlist(event.data)
-        file_items, folder_items = [], []
-        for item in dropped:
-            normalized = str(item).strip().strip("{}")
-            if not normalized:
-                continue
-            path_obj = Path(normalized)
-            if path_obj.is_file():
-                file_items.append(normalized)
-            elif path_obj.is_dir():
-                folder_items.append(normalized)
-        if file_items:
-            add_file_paths(file_items)
-        if folder_items:
-            add_folder_paths(folder_items)
-        return event.action if hasattr(event, "action") else None
-
     app.root.update_idletasks()
 
-    drop_area.delete("all")
-    drop_width = max(700, drop_area.winfo_width())
-    drop_height = max(100, drop_area.winfo_height())
+    detail_width = max(700, detail_card.winfo_width())
 
-    target_left_width = drop_width
-    gap = 0
-    total_width = max(target_left_width + 160 + gap, split.winfo_width())
-    left_width = target_left_width
-    right_width = max(160, total_width - left_width - gap)
-    split.grid_columnconfigure(0, minsize=left_width, weight=0)
-    split.grid_columnconfigure(1, minsize=right_width, weight=0)
-    split.grid_columnconfigure(2, minsize=0, weight=1)
-
+    detail_card.delete("all")
+    full_detail_height = max(100, left_col.winfo_height(), detail_card.winfo_height())
+    detail_bottom_shrink = 12
+    detail_height = max(100, full_detail_height - detail_bottom_shrink)
     app._smooth_rounded_rect(
-        drop_area,
-        1,
-        1,
-        drop_width - 1,
-        drop_height - 1,
-        20,
-        fill="#ffffff",
-        outline="#b9c8e9",
-        width=2.5,
-        dash=(4, 4),
-    )
-    center_x = drop_width // 2
-    center_y = drop_height // 2
-    cloud_icon = app.ui_icon_photos.get("workspace_cloud_save")
-    if cloud_icon is not None:
-        drop_area.create_image(center_x, center_y, image=cloud_icon, anchor="center", tags="drop_icon")
-        drop_area.scale("drop_icon", center_x, center_y, 0.3, 0.3)
-    else:
-        drop_area.create_text(center_x, center_y, text="\U0001F4E4", fill="#5c667f", font=("Segoe UI Emoji", 24))
-
-    plus_icon = load_svg_photo(
-        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "plus.svg",
-        max_width=12,
-        max_height=12,
-        tint="#ffffff",
-    )
-
-    drop_button_row = tk.Frame(drop_area, bg="#ffffff")
-    add_file_btn = create_rounded_action(
-        drop_button_row,
-        "파일 추가",
-        pick_files,
-        width=108,
-        height=28,
-        fill="#5555d5",
-        outline="#5555d5",
-        text_color="#ffffff",
-        icon_photo=plus_icon,
-        icon_fallback_text="+",
-    )
-    add_file_btn.pack(side="left")
-
-    add_folder_btn = create_rounded_action(
-        drop_button_row,
-        "폴더 추가",
-        pick_folder,
-        width=108,
-        height=28,
-        fill="#5555d5",
-        outline="#5555d5",
-        text_color="#ffffff",
-        icon_photo=plus_icon,
-        icon_fallback_text="+",
-    )
-    add_folder_btn.pack(side="left", padx=(8, 0))
-
-    drop_area.plus_icon_ref = plus_icon
-    drop_area.create_window(center_x, drop_height - 26, window=drop_button_row, anchor="center")
-
-    left_detail_card.delete("all")
-    detail_width = drop_width
-    detail_height = max(100, left_detail_card.winfo_height())
-    app._smooth_rounded_rect(
-        left_detail_card,
+        detail_card,
         1,
         1,
         detail_width - 1,
@@ -607,11 +501,13 @@ def show_save_files_screen(app):
     )
 
     # Keep requested row proportions while fitting fully inside the card.
-    row_weights = [15, 7.5, 70, 7.5]
+    row_weights = [10, 7.5, 80, 7.5]
     row_colors = ["#ffffff", "#edf2fb", "#ffffff", "#edf2fb"]
     total_weight = float(sum(row_weights))
-    inner_x1, inner_y1 = 2, 2
-    inner_x2, inner_y2 = detail_width - 2, detail_height - 2
+    # Keep row backgrounds away from corner arcs so the rounded card edge stays visible.
+    inner_padding = 12
+    inner_x1, inner_y1 = inner_padding, inner_padding
+    inner_x2, inner_y2 = detail_width - inner_padding, detail_height - inner_padding
     inner_height = max(1, inner_y2 - inner_y1)
 
     row_heights = [int(inner_height * (w / total_weight)) for w in row_weights]
@@ -622,7 +518,7 @@ def show_save_files_screen(app):
     divider_y = []
     for idx, row_height in enumerate(row_heights):
         y_next = y_cursor + row_height
-        left_detail_card.create_rectangle(
+        detail_card.create_rectangle(
             inner_x1,
             y_cursor,
             inner_x2,
@@ -635,22 +531,13 @@ def show_save_files_screen(app):
         y_cursor = y_next
 
     for y in divider_y:
-        left_detail_card.create_line(inner_x1, y, inner_x2, y, fill="#d9deea", width=1)
-
-    left_detail_card.create_rectangle(
-        inner_x1,
-        inner_y1,
-        inner_x2,
-        inner_y2,
-        outline="#d9deea",
-        width=1,
-    )
+        detail_card.create_line(inner_x1, y, inner_x2, y, fill="#d9deea", width=1)
 
     row1_height = row_heights[0]
     row1_center_y = inner_y1 + row1_height // 2
     row1_inner_width = max(80, inner_x2 - inner_x1 - 20)
-    row1_frame = tk.Frame(left_detail_card, bg=row_colors[0])
-    left_detail_card.create_window(
+    row1_frame = tk.Frame(detail_card, bg=row_colors[0])
+    detail_card.create_window(
         inner_x1 + 10,
         row1_center_y,
         window=row1_frame,
@@ -668,6 +555,33 @@ def show_save_files_screen(app):
         anchor="w",
     )
     title_label.pack(side="left")
+
+    add_actions = tk.Frame(row1_frame, bg=row_colors[0])
+    add_actions.pack(side="left", padx=(10, 0))
+
+    add_file_btn = create_rounded_action(
+        add_actions,
+        "파일 추가",
+        pick_files,
+        width=96,
+        height=30,
+        fill="#ffffff",
+        outline="#d9deea",
+        text_color="#2d3448",
+    )
+    add_file_btn.pack(side="left")
+
+    add_folder_btn = create_rounded_action(
+        add_actions,
+        "폴더 추가",
+        pick_folder,
+        width=96,
+        height=30,
+        fill="#ffffff",
+        outline="#d9deea",
+        text_color="#2d3448",
+    )
+    add_folder_btn.pack(side="left", padx=(8, 0))
 
     center_actions = tk.Frame(row1_frame, bg=row_colors[0])
 
@@ -826,9 +740,9 @@ def show_save_files_screen(app):
         max_width=14,
         max_height=14,
     )
-    left_detail_card.unchecked_icon_ref = unchecked_icon
-    left_detail_card.checked_icon_ref = checked_icon
-    left_detail_card.checked_white_icon_ref = checked_white_icon
+    detail_card.unchecked_icon_ref = unchecked_icon
+    detail_card.checked_icon_ref = checked_icon
+    detail_card.checked_white_icon_ref = checked_white_icon
 
     file_icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "file_formats"
     file_format_icons = {
@@ -849,14 +763,14 @@ def show_save_files_screen(app):
         "html": load_logo_photo(file_icon_dir / "icons8-html-48.png", max_width=16, max_height=16),
         "file": load_logo_photo(file_icon_dir / "icons8-file-48.png", max_width=16, max_height=16),
     }
-    left_detail_card.file_format_icons_ref = file_format_icons
+    detail_card.file_format_icons_ref = file_format_icons
 
     select_all_checked = False
     select_icon_id = None
     select_text_id = None
 
     if unchecked_icon is not None:
-        select_icon_id = left_detail_card.create_image(
+        select_icon_id = detail_card.create_image(
             col_centers[0],
             row2_center_y,
             image=unchecked_icon,
@@ -864,7 +778,7 @@ def show_save_files_screen(app):
             tags=("row2_select_toggle",),
         )
     else:
-        select_text_id = left_detail_card.create_text(
+        select_text_id = detail_card.create_text(
             col_centers[0],
             row2_center_y,
             text="□",
@@ -876,7 +790,7 @@ def show_save_files_screen(app):
 
     col1_x1 = row2_inner_x1
     col1_x2 = row2_inner_x1 + col_width_px[0]
-    left_detail_card.create_rectangle(
+    detail_card.create_rectangle(
         col1_x1,
         row2_top,
         col1_x2,
@@ -895,9 +809,9 @@ def show_save_files_screen(app):
         if select_icon_id is not None:
             next_icon = checked_icon if icon_checked else unchecked_icon
             if next_icon is not None:
-                left_detail_card.itemconfigure(select_icon_id, image=next_icon)
+                detail_card.itemconfigure(select_icon_id, image=next_icon)
         elif select_text_id is not None:
-            left_detail_card.itemconfigure(select_text_id, text="☑" if icon_checked else "□")
+            detail_card.itemconfigure(select_text_id, text="☑" if icon_checked else "□")
 
     def toggle_row2_select_all(_event=None):
         if not selected_files:
@@ -910,12 +824,12 @@ def show_save_files_screen(app):
         update_row2_select_icon()
         refresh_row3_rows()
 
-    left_detail_card.tag_bind("row2_select_toggle", "<Button-1>", toggle_row2_select_all)
+    detail_card.tag_bind("row2_select_toggle", "<Button-1>", toggle_row2_select_all)
 
     for idx, header_text in enumerate(row2_headers):
         if idx == 0 or not header_text:
             continue
-        left_detail_card.create_text(
+        detail_card.create_text(
             col_centers[idx],
             row2_center_y,
             text=header_text,
@@ -933,8 +847,8 @@ def show_save_files_screen(app):
     row4_bottom = row4_top + row_heights[3]
     row4_center_y = (row4_top + row4_bottom) // 2
 
-    row3_canvas = tk.Canvas(left_detail_card, bg=row_colors[2], highlightthickness=0, bd=0)
-    left_detail_card.create_window(
+    row3_canvas = tk.Canvas(detail_card, bg=row_colors[2], highlightthickness=0, bd=0)
+    detail_card.create_window(
         row2_inner_x1,
         row3_inner_y1,
         window=row3_canvas,
@@ -1222,7 +1136,7 @@ def show_save_files_screen(app):
         return status_map.get(status_code, status_map["standby"])
 
     def draw_row4_summary():
-        left_detail_card.delete("row4_summary")
+        detail_card.delete("row4_summary")
 
         total_count = len(selected_files)
         status_counts = {
@@ -1251,7 +1165,7 @@ def show_save_files_screen(app):
         progress_pct_text = f"{int(round(overall_progress * 100.0))}%"
 
         left_start_x = row2_inner_x1 + 10
-        left_detail_card.create_text(
+        detail_card.create_text(
             left_start_x,
             row4_center_y,
             text="전체 진행률",
@@ -1263,7 +1177,7 @@ def show_save_files_screen(app):
 
         in_progress_text = f"{uploading_count} / {total_count} 파일 업로드 중"
         progress_text_x = left_start_x + 72
-        left_detail_card.create_text(
+        detail_card.create_text(
             progress_text_x,
             row4_center_y,
             text=in_progress_text,
@@ -1280,7 +1194,7 @@ def show_save_files_screen(app):
         bar_radius = max(2, (bar_y2 - bar_y1) // 2)
 
         app._smooth_rounded_rect(
-            left_detail_card,
+            detail_card,
             bar_x1,
             bar_y1,
             bar_x2,
@@ -1296,7 +1210,7 @@ def show_save_files_screen(app):
             fill_x2 = bar_x1 + max((bar_y2 - bar_y1), int((bar_x2 - bar_x1) * overall_progress))
             fill_x2 = min(bar_x2, fill_x2)
             app._smooth_rounded_rect(
-                left_detail_card,
+                detail_card,
                 bar_x1,
                 bar_y1,
                 fill_x2,
@@ -1308,7 +1222,7 @@ def show_save_files_screen(app):
                 tags="row4_summary",
             )
 
-        left_detail_card.create_text(
+        detail_card.create_text(
             bar_x2 + 8,
             row4_center_y,
             text=progress_pct_text,
@@ -1325,7 +1239,7 @@ def show_save_files_screen(app):
             f"실패 {status_counts['failed']}"
         )
 
-        left_detail_card.create_text(
+        detail_card.create_text(
             row2_inner_x2 - 10,
             row4_center_y,
             text=right_text,
@@ -2364,59 +2278,11 @@ def show_save_files_screen(app):
     row3_canvas.bind("<Configure>", on_row3_canvas_configure)
     bind_row3_scroll_gestures(row3_canvas)
     bind_row3_scroll_gestures(row3_body)
-    left_detail_card.bind("<MouseWheel>", on_left_card_mousewheel, add="+")
-    left_detail_card.bind("<ButtonPress-1>", on_left_card_drag_press, add="+")
-    left_detail_card.bind("<B1-Motion>", on_left_card_drag_motion, add="+")
-    left_detail_card.bind("<ButtonRelease-1>", on_left_card_drag_release, add="+")
+    detail_card.bind("<MouseWheel>", on_left_card_mousewheel, add="+")
+    detail_card.bind("<ButtonPress-1>", on_left_card_drag_press, add="+")
+    detail_card.bind("<B1-Motion>", on_left_card_drag_motion, add="+")
+    detail_card.bind("<ButtonRelease-1>", on_left_card_drag_release, add="+")
     refresh_row3_rows = render_row3_rows
     refresh_row3_rows()
 
-    right_col.update_idletasks()
-
     draw_right_card()
-
-    right_bottom_card.delete("all")
-    right_bottom_width = min(245, right_bottom_card.winfo_width())
-    right_bottom_height = max(75, right_bottom_card.winfo_height()) - 10
-    app._smooth_rounded_rect(
-        right_bottom_card,
-        1,
-        1,
-        right_bottom_width - 1,
-        right_bottom_height - 1,
-        24,
-        fill="#edf2fb",
-        outline="#d9deea",
-        width=1,
-    )
-
-    guide_lines = [
-        "파일명 규칙 안내",
-        "YYYY-MM-DD_문서유형_태그_원본파일명",
-        "예시:",
-        "2026-07-01_정관_수정본_히즈컴정관.pdf",
-        "특수문자는 자동으로 제거되며,",
-        "중복 시 파일명 뒤에 번호가 추가됩니다.",
-    ]
-    guide_left = 12
-    guide_top = 12
-    guide_line_height = 18
-    title_gap = 12
-    line_gap = 8
-
-    for idx, text_value in enumerate(guide_lines):
-        y = guide_top + (idx * guide_line_height)
-        if idx >= 1:
-            y += title_gap
-        if idx >= 2:
-            y += line_gap
-        if idx >= 4:
-            y += line_gap
-        right_bottom_card.create_text(
-            guide_left,
-            y,
-            text=text_value,
-            fill="#1f2b4a",
-            font=app._font(12, "bold") if idx == 0 else app._font(10, "bold") if idx == 1 else app._font(10, "italic") if idx == 3 else app._font(10),
-            anchor="nw",
-        )

@@ -14,7 +14,7 @@ MENU_BORDER = colors.BORDER
 MENU_TEXT_PRIMARY = colors.TEXT_PRIMARY
 MENU_TEXT_SECONDARY = colors.TEXT_SECONDARY
 
-MENU_NAV_ACTIVE_BG = colors.PRIMARY_PRESSED
+MENU_NAV_ACTIVE_BG = colors.PRIMARY
 MENU_NAV_HOVER_BG = colors.PRIMARY_HOVER
 MENU_NAV_CARD_BG = MENU_SURFACE_ALT
 MENU_NAV_ACTIVE_TEXT = MENU_TEXT_INVERSE
@@ -149,11 +149,11 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     card_height = 100
     card_gap_y = card_pad_x
 
-    nav_section.grid_columnconfigure(0, weight=1)
-    nav_section.grid_rowconfigure(1, weight=1)
-
     nav_top = tk.Frame(nav_section, bg=parent.cget("bg"))
-    nav_top.grid(row=0, column=0, sticky="new", padx=card_pad_x, pady=(card_pad_x, 0))
+    nav_top.pack(side="top", fill="x", padx=card_pad_x, pady=(card_pad_x, 0))
+
+    nav_spacer = tk.Frame(nav_section, bg=parent.cget("bg"))
+    nav_spacer.pack(side="top", fill="both", expand=True)
 
     def build_row(key, icon, title, desc, command, icon_fg, active_bg, is_last):
         is_active = key == active_key
@@ -201,7 +201,8 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
 
             card.delete("nav")
             width = max(180, card.winfo_width())
-            app._smooth_rounded_rect(card, 1, 1, width - 1, 95, 20, fill=bg_color, outline=border, width=1, tags="nav")
+            height = max(card_height, card.winfo_height())
+            app._smooth_rounded_rect(card, 1, 1, width - 1, height - 1, 20, fill=bg_color, outline=border, width=1, tags="nav")
             icon_photo_item = (icon_photos or {}).get(key)
             use_active_icon = mode in ("hover", "active")
             if isinstance(icon_photo_item, dict):
@@ -257,7 +258,6 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
         )
 
     storage_outer = tk.Frame(nav_section, bg=parent.cget("bg"))
-    storage_outer.grid(row=2, column=0, sticky="sew", padx=card_pad_x, pady=(0, card_pad_x))
     storage_card = tk.Canvas(
         storage_outer,
         bg=parent.cget("bg"),
@@ -365,6 +365,21 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
 
     storage_card.bind("<Configure>", draw_storage_card, add="+")
     draw_storage_card()
+
+    storage_mounted = {"done": False}
+
+    def mount_storage_card_when_ready(_event=None):
+        if storage_mounted["done"]:
+            return
+        min_height = nav_top.winfo_reqheight() + card_height + (card_pad_x * 4)
+        if nav_section.winfo_height() < min_height:
+            return
+        storage_outer.pack(side="bottom", fill="x", padx=card_pad_x, pady=(0, card_pad_x))
+        storage_mounted["done"] = True
+        nav_section.unbind("<Configure>", configure_bind_id)
+
+    configure_bind_id = nav_section.bind("<Configure>", mount_storage_card_when_ready, add="+")
+    nav_section.after_idle(mount_storage_card_when_ready)
 
     return rows
 
