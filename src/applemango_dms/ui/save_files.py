@@ -6,8 +6,11 @@ from datetime import datetime
 import re
 import time
 import math
+import os
 import shutil
 import threading
+import hashlib
+import mimetypes
 from tkinter import filedialog
 import applemango_dms.config as config
 import applemango_dms.state as state
@@ -275,18 +278,35 @@ def show_save_files_screen(app):
         refresh_row3_rows()
 
         def upload_worker(target_rows):
+            def compute_sha256(file_path):
+                hasher = hashlib.sha256()
+                with Path(file_path).open("rb") as handle:
+                    while True:
+                        block = handle.read(1024 * 1024)
+                        if not block:
+                            break
+                        hasher.update(block)
+                return hasher.hexdigest()
+
             reserved_names = set()
             for row_key in target_rows:
                 source = Path(row_key)
                 row_state = row_metadata_state.setdefault(row_key, {})
-                selected_document_date = row_state.get("date_iso") or datetime.now().strftime("%Y-%m-%d")
                 doc_type = row_state.get("document_type") or "기타"
                 
                 tags = row_state.get("tags") or ""
 
                 destination_path = None
+                database_saved = False
 
                 try:
+                    selected_document_date = row_state.get("date_iso")
+
+                    if not selected_document_date:
+                        raise ValueError(
+                            "A complete document date is required."
+                        )
+
                     document_type_id = document_type_id_by_name.get(
                     doc_type
                     )
@@ -308,24 +328,44 @@ def show_save_files_screen(app):
 
                     total_size = max(1, source.stat().st_size)
                     copied_size = 0
+                    checksum_hasher = hashlib.sha256()
 
-                    with source.open("rb") as src_f, destination_path.open("wb") as dst_f:
+                    with source.open("rb") as src_f, destination_path.open("xb") as dst_f:
                         while True:
                             chunk = src_f.read(1024 * 1024)
                             if not chunk:
                                 break
                             dst_f.write(chunk)
+                            checksum_hasher.update(chunk)
                             copied_size += len(chunk)
                             ratio = copied_size / float(total_size)
                             app.root.after(0, lambda key=row_key, r=ratio: (set_row_upload_state(key, status_code="uploading", progress_ratio=r), refresh_row3_rows()))
+
+                        dst_f.flush()
+                        os.fsync(dst_f.fileno())
+
+                    source_checksum = checksum_hasher.hexdigest()
+                    destination_checksum = compute_sha256(destination_path)
+                    if destination_checksum != source_checksum:
+                        raise IOError(
+                            "Copied file failed integrity verification "
+                            f"(source={source_checksum}, destination={destination_checksum})."
+                        )
 
                     shutil.copystat(source, destination_path)
 
                     relative_path = destination_path.relative_to(destination)
 
                     source_stat = source.stat()
+                    mime_type, _ = mimetypes.guess_type(source.name)
 
-                    file_id = app.db.insert_file_record(
+                    tag_names = [
+                        value.strip()
+                        for value in re.split(r"[,;]", tags)
+                        if value.strip()
+                    ]
+
+                    app.db.create_file_with_tags(
                         {
                             "workspace_id": workspace_id,
                             "document_type_id": document_type_id,
@@ -345,26 +385,22 @@ def show_save_files_screen(app):
                                 source_stat.st_mtime
                             ).isoformat(timespec="seconds"),
                             "file_ext": source.suffix,
-                            "mime_type": None,
+                            "mime_type": mime_type,
                             "file_size": destination_path.stat().st_size,
-                            "checksum": None,
-                        }
-                    )
-
-                    tag_names = [
-                        value.strip() for value in re.split(r"[,;]", tags) if value.strip()]
-
-                    app.db.assign_tags(
-                        workspace_id,
-                        file_id,
+                            "checksum": source_checksum,
+                        },
                         tag_names,
                     )
+
+                    database_saved = True
 
                     app.root.after(0, lambda key=row_key: (set_row_upload_state(key, status_code="success", progress_ratio=1.0), refresh_row3_rows()))
  
                 except Exception as exc:
                     if (
-                        destination_path is not None and destination_path.exists()
+                        not database_saved
+                        and destination_path is not None
+                        and destination_path.exists()
                     ):
                         try:
                             destination_path.unlink()

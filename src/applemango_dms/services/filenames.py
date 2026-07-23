@@ -38,17 +38,22 @@ class FilenameBuilder:
             return stem
         return stem[:max_stem_length].rstrip(' ._') or 'untitled'
 
-    def build_filename(self, archive_date, document_type, tags, original_name):
+    def build_filename(self, document_date, document_type, tags, original_name):
         original = Path(original_name)
         stem = self._sanitize_part(original.stem) or 'untitled'
         ext = original.suffix
 
-        date_part = self._sanitize_part(archive_date) or date.today().isoformat()
+        date_part = self._sanitize_part(document_date)
+
+        if not document_date:
+            raise ValueError("document_date is required.")
+
         doc_part = self._sanitize_part(document_type) or '기타'
         tag_tokens = self._normalize_tags(tags)
         tag_part = '-'.join(tag_tokens) if tag_tokens else 'no-tag'
 
-        composite_stem = '__'.join([date_part, doc_part, tag_part, stem])
+        composite_stem = '__'.join([date_part, doc_part, stem])
+
         composite_stem = self._trim_stem_for_extension(composite_stem, ext)
         return composite_stem + ext
 

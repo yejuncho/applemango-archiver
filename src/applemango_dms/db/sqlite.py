@@ -11,9 +11,13 @@ class ArchiveDatabase:
         self._init_db()
 
     def _connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(
+            self.db_path,
+            timeout=10.0,
+        )
         conn.row_factory = sqlite3.Row
         conn.execute('PRAGMA foreign_keys = ON;')
+        conn.execute('PRAGMA busy_timeout = 10000;')
         return conn
 
     def _init_db(self):
@@ -527,68 +531,157 @@ class ArchiveDatabase:
         
         return normalized
 
-    def insert_file_record(self, record):
-        file_ext = self._require_text(
-            record.get("file_ext"),
-            "file_ext",
-        ).lower()
+    @staticmethod
+    def _normalize_file_ext(value):
+        file_ext = str(value or "").strip().lower()
 
-        if not file_ext.startswith("."):
+        if file_ext and not file_ext.startswith("."):
             file_ext = f".{file_ext}"
 
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO files (
-                    workspace_id,
-                    document_type_id,
-                    uploaded_by,
-                    original_filename,
-                    archived_filename,
-                    relative_path,
-                    document_date,
-                    source_created_at,
-                    source_modified_at,
-                    file_ext,
-                    mime_type,
-                    file_size,
-                    checksum
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    int(record["workspace_id"]),
-                    int(record["document_type_id"]),
-                    self._require_text(
-                        record.get("uploaded_by"),
-                        "uploaded_by",
-                    ),
-                    self._require_text(
-                        record.get("original_filename"),
-                        "original_filename",
-                    ),
-                    self._require_text(
-                        record.get("archived_filename"),
-                        "archived_filename",
-                    ),
-                    self._require_text(
-                        record.get("relative_path"),
-                        "relative_path",
-                    ),
-                    self._require_text(
-                        record.get("document_date"),
-                        "document_date",
-                    ),
-                    record.get("source_created_at"),
-                    record.get("source_modified_at"),
-                    file_ext,
-                    record.get("mime_type"),
-                    record.get("file_size"),
-                    record.get("checksum"),
+        return file_ext
+
+    def _insert_file_record_with_conn(self, conn, record):
+        cursor = conn.execute(
+            """
+            INSERT INTO files (
+                workspace_id,
+                document_type_id,
+                uploaded_by,
+                original_filename,
+                archived_filename,
+                relative_path,
+                document_date,
+                source_created_at,
+                source_modified_at,
+                file_ext,
+                mime_type,
+                file_size,
+                checksum
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(record["workspace_id"]),
+                int(record["document_type_id"]),
+                self._require_text(
+                    record.get("uploaded_by"),
+                    "uploaded_by",
                 ),
+                self._require_text(
+                    record.get("original_filename"),
+                    "original_filename",
+                ),
+                self._require_text(
+                    record.get("archived_filename"),
+                    "archived_filename",
+                ),
+                self._require_text(
+                    record.get("relative_path"),
+                    "relative_path",
+                ),
+                self._require_text(
+                    record.get("document_date"),
+                    "document_date",
+                ),
+                record.get("source_created_at"),
+                record.get("source_modified_at"),
+                self._normalize_file_ext(record.get("file_ext")),
+                record.get("mime_type"),
+                record.get("file_size"),
+                record.get("checksum"),
+            ),
+        )
+
+        return int(cursor.lastrowid)
+
+    def _assign_tags_with_conn(
+        self,
+        conn,
+        workspace_id,
+        file_id,
+        normalized_names,
+        verify_file_exists=True,
+    ):
+        workspace_id = int(workspace_id)
+        file_id = int(file_id)
+
+        if verify_file_exists:
+            file_row = conn.execute(
+                """
+                SELECT id
+                FROM files
+                WHERE id = ?
+                AND workspace_id = ?
+                """,
+                (file_id, workspace_id),
+            ).fetchone()
+
+            if file_row is None:
+                raise LookupError("File not found in workspace.")
+
+        for name in normalized_names:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO tags (
+                    workspace_id,
+                    name
+                )
+                VALUES (?, ?)
+                """,
+                (workspace_id, name),
             )
 
-            return int(cursor.lastrowid)
+            tag_row = conn.execute(
+                """
+                SELECT id
+                FROM tags
+                WHERE workspace_id = ?
+                AND name = ?
+                """,
+                (workspace_id, name),
+            ).fetchone()
+
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO file_tags (
+                    file_id,
+                    tag_id
+                )
+                VALUES (?, ?)
+                """,
+                (file_id, tag_row["id"]),
+            )
+
+    def assign_tags(self, workspace_id, file_id, tag_names):
+        normalized_names = self._normalize_tag_names(tag_names)
+
+        with self._connect() as conn:
+            self._assign_tags_with_conn(
+                conn,
+                workspace_id,
+                file_id,
+                normalized_names,
+                verify_file_exists=True,
+            )
+
+    def create_file_with_tags(self, record, tag_names):
+        normalized_names = self._normalize_tag_names(tag_names)
+
+        with self._connect() as conn:
+            file_id = self._insert_file_record_with_conn(conn, record)
+            self._assign_tags_with_conn(
+                conn,
+                record["workspace_id"],
+                file_id,
+                normalized_names,
+                verify_file_exists=False,
+            )
+
+        return file_id
+
+    def insert_file_record(self, record):
+        with self._connect() as conn:
+            return self._insert_file_record_with_conn(conn, record)
 
     def _normalize_statuses(self, statuses):
         if statuses is None:
@@ -795,56 +888,6 @@ class ArchiveDatabase:
                 seen.add(key)
 
         return normalized
-
-    def assign_tags(self, workspace_id, file_id, tag_names):
-        normalized_names = self._normalize_tag_names(tag_names)
-
-        with self._connect() as conn:
-            file_row = conn.execute(
-                """
-                SELECT id
-                FROM files
-                WHERE id = ?
-                AND workspace_id = ?
-                """,
-                (file_id, workspace_id),
-            ).fetchone()
-
-            if file_row is None:
-                raise LookupError("File not found in workspace.")
-
-            for name in normalized_names:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO tags (
-                        workspace_id,
-                        name
-                    )
-                    VALUES (?, ?)
-                    """,
-                    (workspace_id, name),
-                )
-
-                tag_row = conn.execute(
-                    """
-                    SELECT id
-                    FROM tags
-                    WHERE workspace_id = ?
-                    AND name = ?
-                    """,
-                    (workspace_id, name),
-                ).fetchone()
-
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO file_tags (
-                        file_id,
-                        tag_id
-                    )
-                    VALUES (?, ?)
-                    """,
-                    (file_id, tag_row["id"]),
-                )
 
     def get_workspace_tags(self, workspace_id):
         with self._connect() as conn:
