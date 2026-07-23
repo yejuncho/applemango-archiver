@@ -592,7 +592,7 @@ def show_save_files_screen(app):
         height=row1_window_height,
     )
 
-    row1_title_width = 205
+    row1_title_width = 180
     row1_frame.grid_rowconfigure(0, minsize=row1_window_height)
     row1_frame.grid_columnconfigure(0, minsize=row1_title_width, weight=0)
     row1_frame.grid_columnconfigure(1, weight=0)
@@ -656,7 +656,7 @@ def show_save_files_screen(app):
         return wrapper
 
     add_actions = tk.Frame(row1_frame, bg=row_colors[0])
-    add_actions.grid(row=0, column=1, sticky="w", padx=(10, 0))
+    add_actions.grid(row=0, column=1, sticky="w", padx=(0, 0))
 
     row1_manage_actions = tk.Frame(row1_frame, bg=row_colors[0])
     row1_manage_actions.grid(row=0, column=2, sticky="w", padx=(row1_icon_gap, 0))
@@ -1400,7 +1400,7 @@ def show_save_files_screen(app):
         )
 
         in_progress_text = f"{uploading_count} / {total_count} 파일 업로드 중"
-        progress_text_x = left_start_x + 72
+        progress_text_x = left_start_x + 90
         detail_card.create_text(
             progress_text_x,
             row4_center_y,
@@ -1411,8 +1411,8 @@ def show_save_files_screen(app):
             tags=("row4_summary",),
         )
 
-        bar_x1 = row2_inner_x1 + 200
-        bar_x2 = row2_inner_x1 + 430
+        bar_x1 = row2_inner_x1 + 245
+        bar_x2 = row2_inner_x1 + 600
         bar_y1 = row4_center_y - 5
         bar_y2 = row4_center_y + 5
         bar_radius = max(2, (bar_y2 - bar_y1) // 2)
@@ -2372,17 +2372,18 @@ def show_save_files_screen(app):
                 text_start_x = col2_left_local + 27
             col2_right_local = col2_left_local + col_width_px[1]
             col2_text_max_width = max(0, int(col2_right_local - text_start_x - 6))
+            row_name_font = app._font(11)
             col2_text_value = truncate_to_pixel_width(
                 row_values["original_name"],
                 col2_text_max_width,
-                app._font(9),
+                row_name_font,
             )
             row_canvas.create_text(
                 text_start_x,
                 table_row_height // 2,
                 text=col2_text_value,
                 fill=row_name_text_color,
-                font=app._font(11),
+                font=row_name_font,
                 anchor="w",
             )
 
@@ -2485,11 +2486,11 @@ def show_save_files_screen(app):
             progress_pct_text = f"{int(round(progress_ratio * 100.0))}%"
 
             progress_text_w = 28
-            bar_x1 = progress_col_left + 4
+            bar_x1 = progress_col_left + 20
             base_bar_x2 = progress_col_left + max(16, progress_col_width - progress_text_w - 4)
             bar_extension = int((base_bar_x2 - bar_x1) * 0.2)
             bar_full_x2 = min(progress_col_left + progress_col_width - progress_text_w, base_bar_x2 + bar_extension)
-            bar_x2 = bar_x1 + max(12, int((bar_full_x2 - bar_x1) * 0.9))
+            bar_x2 = bar_x1 + max(12, int((bar_full_x2 - bar_x1) * 0.95))
             bar_y1 = (table_row_height // 2) - 4
             bar_y2 = (table_row_height // 2) + 4
             bar_radius = max(2, (bar_y2 - bar_y1) // 2)
