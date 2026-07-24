@@ -15,6 +15,7 @@ from tkinter import filedialog
 import applemango_dms.config as config
 import applemango_dms.state as state
 from applemango_dms.services.nas import get_mapped_network_drives, normalize_drive_letter
+from applemango_dms.ui import colors
 from applemango_dms.ui.workplace_menu import build_sidebar_nav
 from applemango_dms.utils.images import load_logo_photo, load_svg_photo
 
@@ -28,6 +29,36 @@ except ImportError:
     DND_FILES = None
     TkinterDnD = None
 
+SF_SURFACE = colors.SURFACE_ALT
+SF_SURFACE_ALT = colors.SURFACE_ACCENT_SOFT
+SF_SURFACE_HOVER = colors.SURFACE_HOVER
+SF_SURFACE_HOVER_SOFT = colors.SURFACE_HOVER_SOFT
+SF_SURFACE_DANGER_HOVER = colors.SURFACE_DANGER_HOVER
+
+SF_BORDER = colors.BORDER_LIGHT
+SF_BORDER_INPUT = colors.BORDER_INPUT
+
+SF_TEXT_MAIN = colors.TEXT_EMPHASIS
+SF_TEXT_DARK = colors.TEXT_NEUTRAL_DARK
+SF_TEXT_TINT = colors.TEXT_TINT
+SF_TEXT_MUTED = colors.TEXT_SECONDARY
+SF_TEXT_SUBTLE = colors.TEXT_SUBTLE
+SF_TEXT_PLACEHOLDER = colors.TEXT_PLACEHOLDER
+SF_TEXT_INVERSE = colors.SURFACE_ALT
+
+SF_PRIMARY = colors.SECONDARY_STRONG
+SF_PRIMARY_HOVER = colors.SECONDARY_STRONG_HOVER
+SF_PRIMARY_ACTIVE = colors.SECONDARY_ACTIVE
+SF_PRIMARY_GLOW = colors.SECONDARY_GLOW
+SF_PRIMARY_GLOW_STRONG = colors.SECONDARY_GLOW_STRONG
+SF_PRIMARY_ACTION_HOVER = colors.PRIMARY_ACTION_HOVER
+SF_ROW_SELECTED_SEPARATOR = colors.ROW_SELECTED_SEPARATOR
+
+SF_STATUS_PROCESSING = colors.PROCESSING
+SF_STATUS_FAILED = colors.FAILED_STRONG
+SF_STATUS_SUCCESS = colors.SUCCESS_STRONG
+SF_STATUS_STANDBY = colors.STANDBY
+
 def show_save_files_screen(app):
     shell = app._create_workspace_shell()
     app.root.title("애플망고 DMS - 파일 저장")
@@ -37,9 +68,9 @@ def show_save_files_screen(app):
         shell["sidebar"],
         "save",
         [
-            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, "#2d6cdf"),
-            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, "#111111"),
-            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, "#d33e3e"),
+            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, SF_STATUS_PROCESSING),
+            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, SF_TEXT_DARK),
+            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, SF_STATUS_FAILED),
         ],
         icon_photos={
             "save": app.ui_icon_photos.get("workspace_file_save"),
@@ -51,7 +82,7 @@ def show_save_files_screen(app):
     outer = shell["content"]
     app._build_workspace_page_header(outer, "파일 저장", "아래 버튼을 클릭하여 파일 또는 폴더를 선택하세요.")
 
-    board = tk.Frame(outer, bg="#ffffff", highlightthickness=0, bd=0)
+    board = tk.Frame(outer, bg=SF_SURFACE, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)
 
     selected_files = []
@@ -86,24 +117,24 @@ def show_save_files_screen(app):
             "This workspace has no active document types."
         )
 
-    split = tk.Frame(board, bg="#ffffff")
+    split = tk.Frame(board, bg=SF_SURFACE)
     split.pack(fill="both", expand=True, padx=10, pady=0)
     split.grid_anchor("nw")
     split.grid_columnconfigure(0, weight=1)
     split.grid_rowconfigure(0, weight=1)
 
-    left_col = tk.Frame(split, bg="#ffffff")
+    left_col = tk.Frame(split, bg=SF_SURFACE)
     left_col.grid(row=0, column=0, sticky="nsew")
     left_col.grid_rowconfigure(0, weight=1)
     left_col.grid_columnconfigure(0, weight=1)
 
-    detail_card = tk.Canvas(left_col, bg="#ffffff", highlightthickness=0, bd=0)
+    detail_card = tk.Canvas(left_col, bg=SF_SURFACE, highlightthickness=0, bd=0)
     detail_card.grid(row=0, column=0, sticky="nsew")
 
     # Keep right-side canvases alive for future popup/window reuse,
     # but do not place them in the current single-column layout.
-    right_card = tk.Canvas(split, bg="#ffffff", highlightthickness=0, bd=0)
-    right_bottom_card = tk.Canvas(split, bg="#ffffff", highlightthickness=0, bd=0)
+    right_card = tk.Canvas(split, bg=SF_SURFACE, highlightthickness=0, bd=0)
+    right_bottom_card = tk.Canvas(split, bg=SF_SURFACE, highlightthickness=0, bd=0)
 
     def add_file_paths(paths):
         normalized = []
@@ -444,10 +475,10 @@ def show_save_files_screen(app):
             button_canvas.delete("all")
             fill_color = base_fill
             outline_color = base_outline
-            if mode == "hover" and base_fill == "#ffffff":
-                fill_color = "#f6f8fc"
-            elif mode == "hover" and base_fill != "#ffffff":
-                fill_color = "#245bc0"
+            if mode == "hover" and base_fill == SF_SURFACE:
+                fill_color = SF_SURFACE_HOVER
+            elif mode == "hover" and base_fill != SF_SURFACE:
+                fill_color = SF_PRIMARY_ACTION_HOVER
             else:
                 if button_canvas.override_fill is not None:
                     fill_color = button_canvas.override_fill
@@ -516,14 +547,14 @@ def show_save_files_screen(app):
         detail_width - 1,
         detail_height - 1,
         24,
-        fill="#ffffff",
-        outline="#d9deea",
+        fill=SF_SURFACE,
+        outline=SF_BORDER,
         width=1,
     )
 
     # Keep requested row proportions while fitting fully inside the card.
     row_weights = [10, 7.5, 80, 7.5]
-    row_colors = ["#ffffff", "#edf2fb", "#ffffff", "#edf2fb"]
+    row_colors = [SF_SURFACE, SF_SURFACE_ALT, SF_SURFACE, SF_SURFACE_ALT]
     total_weight = float(sum(row_weights))
     # Keep row backgrounds away from corner arcs so the rounded card edge stays visible.
     inner_padding = 12
@@ -552,7 +583,7 @@ def show_save_files_screen(app):
         y_cursor = y_next
 
     for y in divider_y:
-        detail_card.create_line(inner_x1, y, inner_x2, y, fill="#d9deea", width=1)
+        detail_card.create_line(inner_x1, y, inner_x2, y, fill=SF_BORDER, width=1)
 
     row1_height = row_heights[0]
     row1_center_y = inner_y1 + row1_height // 2
@@ -586,7 +617,7 @@ def show_save_files_screen(app):
         row1_title_slot,
         textvariable=pending_count_var,
         bg=row_colors[0],
-        fg="#1f2b4a",
+        fg=SF_TEXT_MAIN,
         font=app._font(14, "bold"),
         anchor="w",
     )
@@ -596,7 +627,7 @@ def show_save_files_screen(app):
     row1_icon_gap = 4
     row1_icon_padding = (7, 7)
 
-    def create_icon_action(parent, icon_photo, fallback_text, command, *, hover_bg="#eef2fb", fg="#111111"):
+    def create_icon_action(parent, icon_photo, fallback_text, command, *, hover_bg=SF_SURFACE_HOVER_SOFT, fg=SF_TEXT_DARK):
         wrapper = tk.Frame(parent, bg=row_colors[0], bd=0, highlightthickness=0)
         label = tk.Label(
             wrapper,
@@ -643,31 +674,31 @@ def show_save_files_screen(app):
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "file_add.svg",
         max_width=row1_icon_size,
         max_height=row1_icon_size,
-        tint="#111111",
+        tint=SF_TEXT_DARK,
     )
     add_folder_icon = load_svg_photo(
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "folder_add.svg",
         max_width=row1_icon_size,
         max_height=row1_icon_size,
-        tint="#111111",
+        tint=SF_TEXT_DARK,
     )
     file_settings_icon = load_svg_photo(
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "file_settings.svg",
         max_width=row1_icon_size,
         max_height=row1_icon_size,
-        tint="#111111",
+        tint=SF_TEXT_DARK,
     )
     trash_icon = load_svg_photo(
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "trash.svg",
         max_width=row1_icon_size,
         max_height=row1_icon_size,
-        tint="#111111",
+        tint=SF_TEXT_DARK,
     )
     reset_icon = load_svg_photo(
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "reset.svg",
         max_width=row1_icon_size,
         max_height=row1_icon_size,
-        tint="#111111",
+        tint=SF_TEXT_DARK,
     )
 
     def open_file_settings_window():
@@ -681,18 +712,18 @@ def show_save_files_screen(app):
 
         popup = tk.Toplevel(app.root)
         popup.title("선택한 파일 설정")
-        popup.configure(bg="#ffffff")
+        popup.configure(bg=SF_SURFACE)
         popup.geometry("400x450")
         popup.minsize(240, 320)
         popup.transient(app.root)
 
-        popup_page = tk.Frame(popup, bg="#ffffff", padx=4, pady=4)
+        popup_page = tk.Frame(popup, bg=SF_SURFACE, padx=4, pady=4)
         popup_page.pack(fill="both", expand=True)
 
-        popup_shell = tk.Canvas(popup_page, bg="#ffffff", highlightthickness=0, bd=0)
+        popup_shell = tk.Canvas(popup_page, bg=SF_SURFACE, highlightthickness=0, bd=0)
         popup_shell.pack(fill="both", expand=True)
 
-        popup_card = tk.Canvas(popup_shell, bg="#ffffff", highlightthickness=0, bd=0)
+        popup_card = tk.Canvas(popup_shell, bg=SF_SURFACE, highlightthickness=0, bd=0)
         popup_card_window_id = popup_shell.create_window(0, 0, window=popup_card, anchor="nw")
 
         app._save_files_settings_popup = popup
@@ -793,7 +824,7 @@ def show_save_files_screen(app):
         trash_icon,
         "T",
         remove_selected_placeholder,
-        hover_bg="#fff1f1",
+        hover_bg=SF_SURFACE_DANGER_HOVER,
     )
 
     clear_btn = create_icon_action(
@@ -807,7 +838,7 @@ def show_save_files_screen(app):
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "upload.svg",
         max_width=14,
         max_height=14,
-        tint="#ffffff",
+        tint=SF_TEXT_INVERSE,
     )
     upload_btn = create_rounded_action(
         row1_frame,
@@ -815,9 +846,9 @@ def show_save_files_screen(app):
         start_upload_placeholder,
         width=100,
         height=30,
-        fill="#5555d5",
-        outline="#5555d5",
-        text_color="#ffffff",
+        fill=SF_PRIMARY,
+        outline=SF_PRIMARY,
+        text_color=SF_TEXT_INVERSE,
         icon_photo=upload_icon,
         icon_fallback_text="⬆",
         icon_offset_x=-4,
@@ -847,10 +878,10 @@ def show_save_files_screen(app):
             return
 
         glow_frames = [
-            ("#5555d5", "#5555d5"),
-            ("#5e64e6", "#7d86ff"),
-            ("#6973ff", "#9aa7ff"),
-            ("#5e64e6", "#7d86ff"),
+            (SF_PRIMARY, SF_PRIMARY),
+            (SF_PRIMARY_HOVER, SF_PRIMARY_GLOW),
+            (SF_PRIMARY_ACTIVE, SF_PRIMARY_GLOW_STRONG),
+            (SF_PRIMARY_HOVER, SF_PRIMARY_GLOW),
         ]
         frame_index = upload_glow_state["phase"]
         glow_fill, glow_outline = glow_frames[frame_index]
@@ -984,7 +1015,7 @@ def show_save_files_screen(app):
             col_centers[0],
             row2_center_y,
             text="□",
-            fill="#000000",
+            fill=SF_TEXT_DARK,
             font=app._font(12, "bold"),
             anchor="center",
             tags=("row2_select_toggle",),
@@ -1035,7 +1066,7 @@ def show_save_files_screen(app):
             col_centers[idx],
             row2_center_y,
             text=header_text,
-            fill="#000000",
+            fill=SF_TEXT_DARK,
             font=app._font(12),
             anchor="center",
         )
@@ -1083,9 +1114,9 @@ def show_save_files_screen(app):
     combo_style = ttk.Style(app.root)
     combo_style.configure(
         row_combo_style_name,
-        fieldbackground="#ffffff",
-        background="#ffffff",
-        foreground="#1f2b4a",
+        fieldbackground=SF_SURFACE,
+        background=SF_SURFACE,
+        foreground=SF_TEXT_MAIN,
         arrowsize=12,
     )
 
@@ -1330,10 +1361,10 @@ def show_save_files_screen(app):
 
     def get_status_display(status_code):
         status_map = {
-            "failed": ("실패", "#d33e3e"),
-            "success": ("완료", "#2e9b53"),
-            "standby": ("대기 중", "#000000"),
-            "uploading": ("업로드 중", "#2d6cdf"),
+            "failed": ("실패", SF_STATUS_FAILED),
+            "success": ("완료", SF_STATUS_SUCCESS),
+            "standby": ("대기 중", SF_STATUS_STANDBY),
+            "uploading": ("업로드 중", SF_STATUS_PROCESSING),
         }
         return status_map.get(status_code, status_map["standby"])
 
@@ -1371,7 +1402,7 @@ def show_save_files_screen(app):
             left_start_x,
             row4_center_y,
             text="전체 진행률",
-            fill="#1f2b4a",
+            fill=SF_TEXT_MAIN,
             font=app._font(12, "bold"),
             anchor="w",
             tags=("row4_summary",),
@@ -1383,7 +1414,7 @@ def show_save_files_screen(app):
             progress_text_x,
             row4_center_y,
             text=in_progress_text,
-            fill="#2d3448",
+            fill=SF_TEXT_TINT,
             font=app._font(12),
             anchor="w",
             tags=("row4_summary",),
@@ -1402,7 +1433,7 @@ def show_save_files_screen(app):
             bar_x2,
             bar_y2,
             bar_radius,
-            fill="#d7deea",
+            fill=colors.BORDER_SOFT,
             outline="",
             width=0,
             tags="row4_summary",
@@ -1418,7 +1449,7 @@ def show_save_files_screen(app):
                 fill_x2,
                 bar_y2,
                 bar_radius,
-                fill="#5555d5",
+                fill=SF_PRIMARY,
                 outline="",
                 width=0,
                 tags="row4_summary",
@@ -1428,7 +1459,7 @@ def show_save_files_screen(app):
             bar_x2 + 8,
             row4_center_y,
             text=progress_pct_text,
-            fill="#2d3448",
+            fill=SF_TEXT_TINT,
             font=app._font(11, "bold"),
             anchor="w",
             tags=("row4_summary",),
@@ -1445,7 +1476,7 @@ def show_save_files_screen(app):
             row2_inner_x2 - 10,
             row4_center_y,
             text=right_text,
-            fill="#2d3448",
+            fill=SF_TEXT_TINT,
             font=app._font(12),
             anchor="e",
             tags=("row4_summary",),
@@ -1458,7 +1489,7 @@ def show_save_files_screen(app):
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "expand.svg",
         max_width=12,
         max_height=12,
-        tint="#1f2b4a",
+        tint=SF_TEXT_MAIN,
     )
 
     def get_batch_date_default_text():
@@ -1647,8 +1678,8 @@ def show_save_files_screen(app):
             right_width - 1,
             right_height - 1,
             24,
-            fill="#ffffff",
-            outline="#d9deea",
+            fill=SF_SURFACE,
+            outline=SF_BORDER,
             width=1,
         )
 
@@ -1658,7 +1689,7 @@ def show_save_files_screen(app):
             card_pad_x,
             title_y,
             text=right_title_text,
-            fill="#1f2b4a",
+            fill=SF_TEXT_MAIN,
             font=app._font(12, "bold"),
             anchor="nw",
         )
@@ -1669,7 +1700,7 @@ def show_save_files_screen(app):
             card_pad_x,
             date_label_y,
             text="날짜",
-            fill="#1f2b4a",
+            fill=SF_TEXT_MAIN,
             font=app._font(12, "bold"),
             anchor="nw",
         )
@@ -1689,8 +1720,8 @@ def show_save_files_screen(app):
             date_field_x2,
             date_field_y2,
             field_radius,
-            fill="#ffffff",
-            outline="#c8d0e6",
+            fill=SF_SURFACE,
+            outline=SF_BORDER_INPUT,
             width=1,
         )
 
@@ -1713,9 +1744,9 @@ def show_save_files_screen(app):
             bd=0,
             relief="flat",
             highlightthickness=0,
-            bg="#ffffff",
-            fg="#1f2b4a",
-            insertbackground="#1f2b4a",
+            bg=SF_SURFACE,
+            fg=SF_TEXT_MAIN,
+            insertbackground=SF_TEXT_MAIN,
         )
 
         def on_batch_date_focus_in(_event, var=batch_date_var):
@@ -1765,7 +1796,7 @@ def show_save_files_screen(app):
             card_pad_x,
             doc_label_y,
             text="문서 유형",
-            fill="#1f2b4a",
+            fill=SF_TEXT_MAIN,
             font=app._font(12, "bold"),
             anchor="nw",
         )
@@ -1786,8 +1817,8 @@ def show_save_files_screen(app):
             doc_field_x2,
             doc_field_y2,
             field_radius,
-            fill="#ffffff",
-            outline="#c8d0e6",
+            fill=SF_SURFACE,
+            outline=SF_BORDER_INPUT,
             width=1,
         )
 
@@ -1797,7 +1828,7 @@ def show_save_files_screen(app):
             doc_field_x1 + 10,
             (doc_field_y1 + doc_field_y2) / 2.0,
             text=doc_type_var.get(),
-            fill="#8f96ad" if doc_type_var.get() == "---" else "#1f2b4a",
+            fill=SF_TEXT_PLACEHOLDER if doc_type_var.get() == "---" else SF_TEXT_MAIN,
             font=app._font(12),
             anchor="w",
             tags=("batch_doc_type_field_click",),
@@ -1818,7 +1849,7 @@ def show_save_files_screen(app):
                 expand_icon_x,
                 expand_icon_y,
                 text="▾",
-                fill="#1f2b4a",
+                fill=SF_TEXT_MAIN,
                 font=app._font(11, "bold"),
                 anchor="center",
                 tags=("batch_doc_type_field_click",),
@@ -1838,7 +1869,7 @@ def show_save_files_screen(app):
             value = (doc_type_var.get() or "---").strip() or "---"
             doc_type_var.set(value)
             right_card.itemconfigure(doc_text_id, text=value)
-            right_card.itemconfigure(doc_text_id, fill="#8f96ad" if value == "---" else "#1f2b4a")
+            right_card.itemconfigure(doc_text_id, fill=SF_TEXT_PLACEHOLDER if value == "---" else SF_TEXT_MAIN)
 
         def close_doc_type_popup():
             popup = getattr(right_card, "doc_type_popup_ref", None)
@@ -1868,12 +1899,12 @@ def show_save_files_screen(app):
             popup = tk.Toplevel(app.root)
             popup.overrideredirect(True)
             popup.transient(app.root)
-            popup.configure(bg="#c8d0e6")
+            popup.configure(bg=SF_BORDER_INPUT)
             popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
             popup.lift()
             popup.focus_force()
 
-            body = tk.Frame(popup, bg="#ffffff", highlightthickness=1, highlightbackground="#c8d0e6")
+            body = tk.Frame(popup, bg=SF_SURFACE, highlightthickness=1, highlightbackground=SF_BORDER_INPUT)
             body.pack(fill="both", expand=True)
 
             listbox = tk.Listbox(
@@ -1883,8 +1914,8 @@ def show_save_files_screen(app):
                 activestyle="none",
                 selectmode="browse",
                 font=app._font(10),
-                fg="#1f2b4a",
-                bg="#ffffff",
+                fg=SF_TEXT_MAIN,
+                bg=SF_SURFACE,
             )
             scrollbar = tk.Scrollbar(body, orient="vertical", command=listbox.yview)
             listbox.configure(yscrollcommand=scrollbar.set)
@@ -1944,7 +1975,7 @@ def show_save_files_screen(app):
             card_pad_x,
             tag_label_y,
             text="태그",
-            fill="#1f2b4a",
+            fill=SF_TEXT_MAIN,
             font=app._font(12, "bold"),
             anchor="nw",
         )
@@ -1965,8 +1996,8 @@ def show_save_files_screen(app):
             tag_field_x2,
             tag_field_y2,
             field_radius,
-            fill="#ffffff",
-            outline="#c8d0e6",
+            fill=SF_SURFACE,
+            outline=SF_BORDER_INPUT,
             width=1,
         )
 
@@ -1989,9 +2020,9 @@ def show_save_files_screen(app):
             bd=0,
             relief="flat",
             highlightthickness=0,
-            bg="#ffffff",
-            fg="#1f2b4a",
-            insertbackground="#1f2b4a",
+            bg=SF_SURFACE,
+            fg=SF_TEXT_MAIN,
+            insertbackground=SF_TEXT_MAIN,
         )
 
         def on_batch_tag_key_release(_event, var=batch_tag_var, entry_widget=batch_tag_entry):
@@ -2058,9 +2089,9 @@ def show_save_files_screen(app):
             apply_selected_batch_settings,
             width=125,
             height=30,
-            fill="#5555d5",
-            outline="#5555d5",
-            text_color="#ffffff",
+            fill=SF_PRIMARY,
+            outline=SF_PRIMARY,
+            text_color=SF_TEXT_INVERSE,
         )
         # Keep button placement in the same fixed vertical flow as date/type/tag sections.
         apply_button_gap = 52
@@ -2237,7 +2268,7 @@ def show_save_files_screen(app):
                     icon_center_x,
                     icon_center_y,
                     text="☁",
-                    fill="#5c667f",
+                    fill=SF_TEXT_SUBTLE,
                     font=("Segoe UI Emoji", 42),
                     anchor="center",
                     tags=("empty_upload_icon",),
@@ -2247,7 +2278,7 @@ def show_save_files_screen(app):
                 icon_center_x,
                 icon_center_y + max(52, (empty_cloud_icon_height // 2) + 18),
                 text="클라우드 아이콘을 눌러 파일을 추가할 수 있어요",
-                fill="#6b7280",
+                fill=SF_TEXT_MUTED,
                 font=app._font(12),
                 anchor="center",
                 tags=("empty_upload_text",),
@@ -2259,10 +2290,10 @@ def show_save_files_screen(app):
 
         for row_values in rows:
             row_selected = bool(row_values["checked"])
-            row_bg_color = "#5555d5" if row_selected else row_colors[2]
-            row_primary_text_color = "#ffffff" if row_selected else "#1f2b4a"
-            row_name_text_color = "#ffffff" if row_selected else "#000000"
-            row_separator_color = "#7070e5" if row_selected else "#d9deea"
+            row_bg_color = SF_PRIMARY if row_selected else row_colors[2]
+            row_primary_text_color = SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN
+            row_name_text_color = SF_TEXT_INVERSE if row_selected else SF_TEXT_DARK
+            row_separator_color = SF_ROW_SELECTED_SEPARATOR if row_selected else SF_BORDER
 
             row_canvas = tk.Canvas(
                 row3_body,
@@ -2375,11 +2406,11 @@ def show_save_files_screen(app):
                 bd=0,
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground="#c8d0e6",
-                highlightcolor="#ffffff" if row_selected else "#5555d5",
+                highlightbackground=SF_BORDER_INPUT,
+                highlightcolor=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
                 bg=row_bg_color,
-                fg="#ffffff" if row_selected else "#1f2b4a",
-                insertbackground="#ffffff" if row_selected else "#1f2b4a",
+                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
             )
 
             def on_date_key_release(_event, row_key=row_key, var=date_var, entry_widget=date_entry):
@@ -2432,11 +2463,11 @@ def show_save_files_screen(app):
                 bd=0,
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground="#c8d0e6",
-                highlightcolor="#ffffff" if row_selected else "#5555d5",
+                highlightbackground=SF_BORDER_INPUT,
+                highlightcolor=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
                 bg=row_bg_color,
-                fg="#ffffff" if row_selected else "#1f2b4a",
-                insertbackground="#ffffff" if row_selected else "#1f2b4a",
+                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
             )
 
             def on_tag_key_release(_event, row_key=row_key, var=tag_var, entry_widget=tag_entry):
@@ -2480,7 +2511,7 @@ def show_save_files_screen(app):
                 bar_x2,
                 bar_y2,
                 bar_radius,
-                fill="#d7deea",
+                fill=colors.BORDER_SOFT,
                 outline="",
                 width=0,
             )
@@ -2495,7 +2526,7 @@ def show_save_files_screen(app):
                     fill_x2,
                     bar_y2,
                     bar_radius,
-                    fill="#5555d5",
+                    fill=SF_PRIMARY,
                     outline="",
                     width=0,
                 )
