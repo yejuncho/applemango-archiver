@@ -2,7 +2,7 @@ import json
 import subprocess
 
 from applemango_dms.config import credential_store_path, default_server_name
-from applemango_dms import state
+import applemango_dms.state as state
 
 def _normalize_server_name(server_name):
     raw = str(server_name or "").strip()

@@ -147,28 +147,19 @@ def show_save_files_screen(app):
         workspace_name = (state.active_workspace or "").strip().lower()
         drive_letter = normalize_drive_letter(state.active_workspace_drive)
 
-        print("SAFE DEBUG workspace name:", workspace_name)
-        print("SAFE DEBUG drive letter:", drive_letter)
-
         if not workspace_name or not drive_letter:
-            print("SAFE DEBUG missing workspace name or drive letter")
             return False
 
         mapped = get_mapped_network_drives()
-        print("SAFE DEBUG mapped drives:", mapped)
 
         if not mapped:
-            print("SAFE DEBUG no mapped drives")
             return False
 
         remote_unc = ""
         for mapped_drive, remote in mapped:
-            print("SAFE DEBUG checking:", mapped_drive, "->", remote)
             if normalize_drive_letter(mapped_drive) == drive_letter:
                 remote_unc = str(remote or "").rstrip("\\")
                 break
-
-        print("SAFE DEBUG remote UNC:", remote_unc)
 
         if not remote_unc:
             print("SAFE FAILED: no matching mapped drive for", drive_letter)
@@ -177,8 +168,6 @@ def show_save_files_screen(app):
         # UNC: \\server\share
         parts = [part for part in remote_unc.split("\\") if part]
 
-        print("SAFE DEBUG UNC parts:", parts)
-
         if len(parts) < 2:
             print("SAFE FAILED: bad UNC parts")
             return False
@@ -186,10 +175,6 @@ def show_save_files_screen(app):
         remote_server = parts[0].lower()
         remote_share = parts[1].lower()
         expected_server = (config.default_server_name or "").strip("\\").lower()
-
-        print("SAFE DEBUG remote_server:", remote_server)
-        print("SAFE DEBUG remote_share:", remote_share)
-        print("SAFE DEBUG expected_server:", expected_server)
 
         if expected_server and remote_server != expected_server:
             print("SAFE FAILED: server mismatch")
@@ -200,13 +185,10 @@ def show_save_files_screen(app):
         #    return False
 
         destination_drive = normalize_drive_letter(getattr(destination, "drive", ""))
-        print("SAFE DEBUG destination drive:", destination_drive)
 
         if destination_drive and destination_drive != drive_letter:
             print("SAFE FAILED: destination drive mismatch")
             return False
-
-        print("SAFE PASSED")
         return True
 
     def remove_selected_placeholder():
@@ -249,10 +231,6 @@ def show_save_files_screen(app):
             return None
 
         destination = app.get_workspace_root_path()
-        print("UPLOAD DEBUG destination:", destination)
-        print("UPLOAD DEBUG active_workspace:", state.active_workspace)
-        print("UPLOAD DEBUG active_workspace_drive:", state.active_workspace_drive)
-        print("UPLOAD DEBUG mapped drives:", get_mapped_network_drives())
         if destination is None:
             for row_key in targets:
                 set_row_upload_state(row_key, status_code="failed", progress_ratio=0.0)

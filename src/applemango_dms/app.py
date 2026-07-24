@@ -52,12 +52,17 @@ from applemango_dms.services.nas import (
     normalize_drive_letter,
 )
 
-from applemango_dms.services.workspace import (
+from applemango_dms.services.workspace_mapping import (
     WorkspaceManager,
 )
 
 from applemango_dms.services.filenames import (
     FilenameBuilder,
+)
+
+from applemango_dms.services.workspace_stats import (
+    format_size_for_display,
+    collect_workspace_filesystem_stats,
 )
 
 from applemango_dms.ui.widgets import (
@@ -98,8 +103,9 @@ from applemango_dms.ui.settings import (
     show_change_server_name_dialog as ui_show_change_server_name_dialog,
 )
 
-from applemango_dms.ui.header_controls import (
-    build_header_controls,
+from applemango_dms.ui.workspace_shell import (
+    create_workspace_shell,
+    build_workspace_page_header,
 )
 
 import applemango_dms.ui.colors as colors
@@ -193,50 +199,14 @@ class SequenceArchiverApp:
 
     @staticmethod
     def _format_size_for_display(size_bytes):
-        gb = 1024 ** 3
-        mb = 1024 ** 2
-        if size_bytes >= gb:
-            return f"{size_bytes / gb:.1f} GB"
-        return f"{size_bytes / mb:.1f} MB"
+        return format_size_for_display(size_bytes)
 
     def _collect_workspace_filesystem_stats(self, workspace_name):
         if state.is_demo_mode:
             root_path = self._get_demo_workspace_base_path() / workspace_name
         else:
             root_path = Path(fr"{config.default_server_name}\{workspace_name}")
-        total_size = 0
-        file_count = 0
-        last_mtime = None
-
-        stack = [str(root_path)]
-        while stack:
-            current = stack.pop()
-            try:
-                with os.scandir(current) as entries:
-                    for entry in entries:
-                        try:
-                            stat = entry.stat(follow_symlinks=False)
-                        except OSError:
-                            continue
-
-                        if last_mtime is None or stat.st_mtime > last_mtime:
-                            last_mtime = stat.st_mtime
-
-                        if entry.is_file(follow_symlinks=False):
-                            file_count += 1
-                            total_size += int(stat.st_size)
-                        elif entry.is_dir(follow_symlinks=False):
-                            stack.append(entry.path)
-            except OSError:
-                continue
-
-        last_modified_text = datetime.fromtimestamp(last_mtime).strftime("%Y/%m/%d") if last_mtime else "정보 없음"
-        return {
-            "last_modified": last_modified_text,
-            "size_bytes": total_size,
-            "size_text": self._format_size_for_display(total_size),
-            "fs_file_count": file_count,
-        }
+        return collect_workspace_filesystem_stats(root_path)
 
     def _build_workspace_metadata(self, workspace_name):
         fs_stats = self._collect_workspace_filesystem_stats(workspace_name)
@@ -826,101 +796,7 @@ class SequenceArchiverApp:
         tk.Label(header, text=f"연결 상태: {status_text}", bg="white", anchor="w").pack(fill="x", pady=2)
 
     def _create_workspace_shell(self):
-        self._resize(1372, 900)
-        self.root.title("애플망고 DMS - 워크스페이스")
-        self.clear_screen()
-        self.root.configure(bg="#ffffff")
-
-        bg = tk.Canvas(self.root, bg="#ffffff", highlightthickness=0, bd=0)
-        bg.pack(fill="both", expand=True)
-
-        main_card = self.create_card(
-            bg,
-            width=1272,
-            height=798,
-            fill_top="#ffffff",
-            fill_bottom="#f4f7ff",
-            radius=20,
-        )
-        content = main_card["content"]
-        redraw = main_card["redraw"]
-
-        def on_bg_resize(event):
-            redraw(event.width // 2, event.height // 2)
-
-        bg.bind("<Configure>", on_bg_resize)
-
-        content.configure(bg="#ffffff")
-        shell = tk.Frame(content, bg="#ffffff")
-        shell.pack(fill="both", expand=True)
-
-        header = tk.Frame(shell, bg="#ffffff", highlightthickness=0, bd=0)
-        header.pack(fill="x", pady=(0, 0))
-
-        left = tk.Frame(header, bg="#ffffff", padx=20, pady=14)
-        left.pack(side="left", fill="x", expand=True)
-
-        workspace_name = state.active_workspace or "워크스페이스"
-
-        workspace_folder_icon = self.ui_icon_photos.get("workspace_folder")
-        if workspace_folder_icon is not None:
-            folder_label = tk.Label(left, image=workspace_folder_icon, bg="#ffffff")
-            folder_label.image = workspace_folder_icon
-            folder_label.pack(side="left", padx=(0, 12), pady=(2, 0), anchor="n")
-        else:
-            tk.Label(left, text="\U0001F4C1", font=("Segoe UI Emoji", 19), fg="#2fa44f", bg="#ffffff").pack(side="left", padx=(0, 12), pady=(2, 0), anchor="n")
-        title_block = tk.Frame(left, bg="#ffffff")
-        title_block.pack(side="left", fill="x", expand=True)
-        tk.Label(title_block, text=workspace_name, font=self._font(20, "bold"), fg="#1f2b4a", bg="#ffffff", anchor="w").pack(anchor="w", pady=(0, 0))
-
-        right = tk.Frame(header, bg="#ffffff", padx=20, pady=14)
-        right.pack(side="right", anchor="ne")
-        controls = build_header_controls(self, right, context="workspace", bg="#ffffff")
-        controls.pack(anchor="e")
-
-        body = tk.Frame(shell, bg="#ffffff")
-        body.pack(fill="both", expand=True)
-
-        sidebar_shell = tk.Canvas(body, bg="#ffffff", width=225, highlightthickness=0, bd=0)
-        sidebar_shell.pack(side="left", fill="y", padx=(12, 0), pady=(10, 12))
-
-        sidebar = tk.Frame(sidebar_shell, bg="#ffffff")
-        sidebar_window_id = sidebar_shell.create_window(0, 0, window=sidebar, anchor="nw")
-
-        def redraw_sidebar(_event=None):
-            sidebar_shell.delete("sidepanel")
-            width = max(170, sidebar_shell.winfo_width())
-            height = max(220, sidebar_shell.winfo_height())
-            self._smooth_rounded_rect(
-                sidebar_shell,
-                1,
-                1,
-                width - 1,
-                height - 1,
-                24,
-                fill="#ffffff",
-                outline="#dfe5ee",
-                width=1,
-                tags="sidepanel",
-            )
-            sidebar_shell.coords(sidebar_window_id, 6, 6)
-            sidebar_shell.itemconfigure(sidebar_window_id, width=max(10, width - 12), height=max(10, height - 12))
-            sidebar_shell.tag_lower("sidepanel")
-
-        sidebar_shell.bind("<Configure>", redraw_sidebar)
-
-        content_area = tk.Frame(body, bg="#ffffff", highlightthickness=0, bd=0)
-        content_area.pack(side="left", fill="both", expand=True)
-
-        return {
-            "bg": bg,
-            "card": main_card,
-            "content": content_area,
-            "sidebar": sidebar,
-            "shell": shell,
-            "header": header,
-            "body": body,
-        }
+        return create_workspace_shell(self)
 
     @staticmethod
     def _format_iso_date_input(raw_text):
@@ -969,11 +845,7 @@ class SequenceArchiverApp:
         return ui_show_main_workspace_menu(self)
 
     def _build_workspace_page_header(self, parent, title, subtitle):
-        header = tk.Frame(parent, bg="#ffffff")
-        header.pack(fill="x", padx=20, pady=(16, 12))
-        tk.Label(header, text=title, font=self._font(17, "bold"), fg="#1f2540", bg="#ffffff", anchor="w").pack(fill="x", pady=(0, 4))
-        tk.Label(header, text=subtitle, font=self._font(12), fg="#1f2540", bg="#ffffff", anchor="w").pack(fill="x")
-        return header
+        return build_workspace_page_header(self, parent, title, subtitle)
 
     def build_destination_drive_path(self):
         drive = normalize_drive_letter(state.active_workspace_drive)
