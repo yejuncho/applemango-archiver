@@ -17,6 +17,7 @@ import applemango_dms.state as state
 from applemango_dms.services.nas import get_mapped_network_drives, normalize_drive_letter
 from applemango_dms.ui import colors
 from applemango_dms.ui.workplace_menu import build_sidebar_nav
+from applemango_dms.ui.widgets import RoundedInput
 from applemango_dms.utils.images import load_logo_photo, load_svg_photo
 
 try:
@@ -538,7 +539,7 @@ def show_save_files_screen(app):
 
     detail_card.delete("all")
     full_detail_height = max(100, left_col.winfo_height(), detail_card.winfo_height())
-    detail_bottom_shrink = 12
+    detail_bottom_shrink = 4
     detail_height = max(100, full_detail_height - detail_bottom_shrink)
     app._smooth_rounded_rect(
         detail_card,
@@ -557,7 +558,7 @@ def show_save_files_screen(app):
     row_colors = [SF_SURFACE, SF_SURFACE_ALT, SF_SURFACE, SF_SURFACE_ALT]
     total_weight = float(sum(row_weights))
     # Keep row backgrounds away from corner arcs so the rounded card edge stays visible.
-    inner_padding = 12
+    inner_padding = 8
     inner_x1, inner_y1 = inner_padding, inner_padding
     inner_x2, inner_y2 = detail_width - inner_padding, detail_height - inner_padding
     inner_height = max(1, inner_y2 - inner_y1)
@@ -916,7 +917,7 @@ def show_save_files_screen(app):
     update_action_buttons_visibility()
 
     # Row-2 / Row-3 shared column widths (percent). Last delete column removed; progress column absorbs its width.
-    table_col_widths_pct = [2.5, 32.5, 12.5, 12.5, 12.5, 7.5, 7.5, 12.5]
+    table_col_widths_pct = [2.5, 32.5, 14.5, 12.0, 13.5, 7.5, 7.5, 10.0]
     row2_headers = [
         "",
         "원본 파일명",
@@ -931,8 +932,8 @@ def show_save_files_screen(app):
     row2_top = inner_y1 + row_heights[0]
     row2_bottom = row2_top + row_heights[1]
     row2_center_y = (row2_top + row2_bottom) // 2
-    row2_inner_x1 = inner_x1 + 8
-    row2_inner_x2 = inner_x2 - 8
+    row2_inner_x1 = inner_x1 + 2
+    row2_inner_x2 = inner_x2 - 2
     row2_inner_width = max(1, row2_inner_x2 - row2_inner_x1)
 
     col_width_px = [int(row2_inner_width * (pct / 100.0)) for pct in table_col_widths_pct]
@@ -1319,10 +1320,11 @@ def show_save_files_screen(app):
             size_text = "-"
 
         row_state = row_metadata_state.setdefault(row_key, {})
-        if "date_digits" not in row_state:
+        if "date_digits" not in row_state or not str(row_state.get("date_digits", "")).strip():
             row_state["date_digits"] = modified
-        if "document_type" not in row_state:
-            row_state["document_type"] = document_type_options[0] if document_type_options else "기타"
+        if "document_type" not in row_state or not str(row_state.get("document_type", "")).strip():
+            preferred_doc_type = "계약서"
+            row_state["document_type"] = preferred_doc_type if preferred_doc_type in document_type_options else (document_type_options[0] if document_type_options else "기타")
         if "tags" not in row_state:
             row_state["tags"] = ""
         if "status_code" not in row_state:
@@ -1491,6 +1493,65 @@ def show_save_files_screen(app):
         max_height=12,
         tint=SF_TEXT_MAIN,
     )
+    row_expand_icon_dark = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "expand.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_MAIN,
+    )
+    row_expand_icon_light = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "expand.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_INVERSE,
+    )
+    row_collapse_icon_dark = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "collapse.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_MAIN,
+    )
+    row_collapse_icon_light = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "collapse.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_INVERSE,
+    )
+    row_calendar_icon_dark = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "calendar.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_MAIN,
+    )
+    row_calendar_icon_light = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "save_files" / "calendar.svg",
+        max_width=14,
+        max_height=14,
+        tint=SF_TEXT_INVERSE,
+    )
+
+    app._save_files_row_date_entries = []
+    app._save_files_row_tag_entries = []
+
+    def set_row_doc_expand_icon(icon_label, row_selected, expanded):
+        if icon_label is None or not icon_label.winfo_exists():
+            return
+        if expanded:
+            icon_photo = row_collapse_icon_light if row_selected else row_collapse_icon_dark
+            fallback_text = "▴"
+        else:
+            icon_photo = row_expand_icon_light if row_selected else row_expand_icon_dark
+            fallback_text = "▾"
+
+        if icon_photo is not None:
+            icon_label.configure(image=icon_photo, text="")
+            icon_label.image = icon_photo
+        else:
+            icon_label.configure(
+                image="",
+                text=fallback_text,
+                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+            )
 
     def get_batch_date_default_text():
         selected_keys = get_right_card_selected_keys()
@@ -1596,6 +1657,30 @@ def show_save_files_screen(app):
             return
         if clicked_widget is None:
             return
+
+        row_doc_popup = getattr(app, "_save_files_row_doc_popup", None)
+        row_doc_anchor = getattr(app, "_save_files_row_doc_popup_anchor", None)
+        row_doc_popup_opened_at = float(getattr(app, "_save_files_row_doc_popup_opened_at", 0.0) or 0.0)
+        now_seconds = time.time()
+        if row_doc_popup is not None and row_doc_popup.winfo_exists():
+            if is_descendant_widget(clicked_widget, row_doc_popup):
+                return
+            if now_seconds - row_doc_popup_opened_at < 0.15:
+                return
+            if row_doc_anchor is None or not is_descendant_widget(clicked_widget, row_doc_anchor):
+                close_row_doc_type_popup()
+
+        row_date_entries = list(getattr(app, "_save_files_row_date_entries", []))
+        row_tag_entries = list(getattr(app, "_save_files_row_tag_entries", []))
+        focused_widget = app.root.focus_get()
+
+        for row_entry in row_date_entries + row_tag_entries:
+            if row_entry is None or not row_entry.winfo_exists():
+                continue
+            if focused_widget is not None and is_descendant_widget(focused_widget, row_entry):
+                if not is_descendant_widget(clicked_widget, row_entry):
+                    active_card.focus_set()
+                break
 
         date_entry = getattr(active_card, "batch_date_entry_ref", None)
         tag_entry = getattr(active_card, "batch_tag_entry_ref", None)
@@ -2126,7 +2211,32 @@ def show_save_files_screen(app):
         add_row3_scroll_delta(-event.delta / 120.0 * 40.0)
         return "break"
 
+    def is_in_row3_editable_column(event):
+        widget = getattr(event, "widget", None)
+        if widget is None:
+            return False
+
+        current = widget
+        while current is not None:
+            bounds = getattr(current, "_save_files_editable_bounds", None)
+            if bounds:
+                try:
+                    local_x = float(getattr(event, "x_root", 0)) - float(current.winfo_rootx())
+                except Exception:
+                    return False
+                for x1, x2 in bounds:
+                    if float(x1) <= local_x <= float(x2):
+                        return True
+                return False
+            current = getattr(current, "master", None)
+
+        return False
+
     def on_row3_drag_press(event):
+        if is_in_row3_editable_column(event):
+            row3_scroll_state["dragging"] = False
+            row3_scroll_state["last_y"] = None
+            return
         row3_scroll_state["dragging"] = True
         row3_scroll_state["last_y"] = event.y_root
 
@@ -2142,11 +2252,24 @@ def show_save_files_screen(app):
         row3_scroll_state["dragging"] = False
         row3_scroll_state["last_y"] = None
 
+    def is_row3_input_widget(widget):
+        if widget is None:
+            return False
+        if isinstance(widget, (tk.Entry, ttk.Entry, tk.Text, tk.Listbox, tk.Spinbox)):
+            return True
+        current = widget
+        while current is not None:
+            if isinstance(current, RoundedInput):
+                return True
+            current = getattr(current, "master", None)
+        return False
+
     def bind_row3_scroll_gestures(widget):
         widget.bind("<MouseWheel>", on_row3_mousewheel, add="+")
-        widget.bind("<ButtonPress-1>", on_row3_drag_press, add="+")
-        widget.bind("<B1-Motion>", on_row3_drag_motion, add="+")
-        widget.bind("<ButtonRelease-1>", on_row3_drag_release, add="+")
+        if not is_row3_input_widget(widget):
+            widget.bind("<ButtonPress-1>", on_row3_drag_press, add="+")
+            widget.bind("<B1-Motion>", on_row3_drag_motion, add="+")
+            widget.bind("<ButtonRelease-1>", on_row3_drag_release, add="+")
         for child in widget.winfo_children():
             bind_row3_scroll_gestures(child)
 
@@ -2170,7 +2293,115 @@ def show_save_files_screen(app):
         if row3_scroll_state["dragging"]:
             on_row3_drag_release(event)
 
+    def close_row_doc_type_popup():
+        popup = getattr(app, "_save_files_row_doc_popup", None)
+        if popup is not None and popup.winfo_exists():
+            popup.destroy()
+        popup_icon_label = getattr(app, "_save_files_row_doc_popup_icon_label", None)
+        popup_icon_row_selected = bool(getattr(app, "_save_files_row_doc_popup_row_selected", False))
+        set_row_doc_expand_icon(popup_icon_label, popup_icon_row_selected, False)
+        app._save_files_row_doc_popup = None
+        app._save_files_row_doc_popup_anchor = None
+        app._save_files_row_doc_popup_icon_label = None
+        app._save_files_row_doc_popup_row_selected = None
+        app._save_files_row_doc_popup_opened_at = 0.0
+
+    def open_row_doc_type_popup(field_widget, row_key, value_var, icon_label, row_selected):
+        existing_popup = getattr(app, "_save_files_row_doc_popup", None)
+        existing_anchor = getattr(app, "_save_files_row_doc_popup_anchor", None)
+        if existing_popup is not None and existing_popup.winfo_exists() and existing_anchor is field_widget:
+            close_row_doc_type_popup()
+            return "break"
+
+        close_row_doc_type_popup()
+
+        popup_width = max(120, int(field_widget.winfo_width()))
+        popup_rows = max(1, min(5, len(document_type_options)))
+        popup_height = (popup_rows * 28) + 12
+        popup_x = field_widget.winfo_rootx()
+        popup_y = field_widget.winfo_rooty() + field_widget.winfo_height() + 2
+
+        popup = tk.Toplevel(app.root)
+        popup.overrideredirect(True)
+        popup.transient(app.root)
+        popup.configure(bg=SF_SURFACE)
+        popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+        popup.lift()
+        popup.focus_force()
+
+        shell_canvas = tk.Canvas(popup, bg=SF_SURFACE, highlightthickness=0, bd=0)
+        shell_canvas.pack(fill="both", expand=True)
+
+        app._smooth_rounded_rect(
+            shell_canvas,
+            1,
+            1,
+            popup_width - 1,
+            popup_height - 1,
+            10,
+            fill=SF_SURFACE,
+            outline=SF_BORDER_INPUT,
+            width=1,
+        )
+
+        body = tk.Frame(shell_canvas, bg=SF_SURFACE, highlightthickness=0, bd=0)
+        shell_canvas.create_window(2, 2, anchor="nw", window=body, width=max(1, popup_width - 4), height=max(1, popup_height - 4))
+
+        listbox = tk.Listbox(
+            body,
+            height=popup_rows,
+            activestyle="none",
+            selectmode="browse",
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+            bg=SF_SURFACE,
+            fg=SF_TEXT_DARK,
+            font=app._font(11),
+            selectbackground=SF_PRIMARY,
+            selectforeground=SF_TEXT_INVERSE,
+            exportselection=False,
+        )
+        listbox.pack(fill="both", expand=True)
+
+        for item in document_type_options:
+            listbox.insert(tk.END, item)
+
+        current_value = (value_var.get() or "").strip()
+        if current_value in document_type_options:
+            current_index = document_type_options.index(current_value)
+            listbox.selection_set(current_index)
+            listbox.see(current_index)
+
+        def commit_selection(_event=None):
+            selection = listbox.curselection()
+            if not selection:
+                return "break"
+            chosen = listbox.get(selection[0]).strip() or "기타"
+            value_var.set(chosen)
+            row_metadata_state.setdefault(row_key, {})["document_type"] = chosen
+            close_row_doc_type_popup()
+            return "break"
+
+        listbox.bind("<ButtonRelease-1>", commit_selection)
+        listbox.bind("<Double-Button-1>", commit_selection)
+        listbox.bind("<Return>", commit_selection)
+        popup.bind("<Escape>", lambda _event: close_row_doc_type_popup())
+        popup.bind("<FocusOut>", lambda _event: close_row_doc_type_popup())
+        popup.after(0, lambda: listbox.focus_set())
+
+        app._save_files_row_doc_popup = popup
+        app._save_files_row_doc_popup_anchor = field_widget
+        app._save_files_row_doc_popup_icon_label = icon_label
+        app._save_files_row_doc_popup_row_selected = bool(row_selected)
+        app._save_files_row_doc_popup_opened_at = time.time()
+        set_row_doc_expand_icon(icon_label, row_selected, True)
+        return "break"
+
     def render_row3_rows():
+        close_row_doc_type_popup()
+        app._save_files_row_date_entries = []
+        app._save_files_row_tag_entries = []
         for child in row3_body.winfo_children():
             child.destroy()
 
@@ -2258,29 +2489,11 @@ def show_save_files_screen(app):
             doc_col_width = col_width_px[3]
             tags_col_left = col_starts[4] - row2_inner_x1
             tags_col_width = col_width_px[4]
-
-            def on_row_canvas_click(
-                event,
-                key=row_key,
-                date_left=date_col_left,
-                date_width=date_col_width,
-                doc_left=doc_col_left,
-                doc_width=doc_col_width,
-                tags_left=tags_col_left,
-                tags_width=tags_col_width,
-            ):
-                date_right = date_left + date_width
-                doc_right = doc_left + doc_width
-                tags_right = tags_left + tags_width
-                if date_left <= event.x <= date_right:
-                    return None
-                if doc_left <= event.x <= doc_right:
-                    return None
-                if tags_left <= event.x <= tags_right:
-                    return None
-                return select_row_item(key, event)
-
-            row_canvas.bind("<Button-1>", on_row_canvas_click, add="+")
+            row_canvas._save_files_editable_bounds = (
+                (date_col_left, date_col_left + date_col_width),
+                (doc_col_left, doc_col_left + doc_col_width),
+                (tags_col_left, tags_col_left + tags_col_width),
+            )
 
             check_icon = (checked_white_icon or checked_icon) if row_values["checked"] else unchecked_icon
             if check_icon is not None:
@@ -2332,22 +2545,74 @@ def show_save_files_screen(app):
                 anchor="w",
             )
 
-            date_var = tk.StringVar(value=row_values["date"])
+            row_state = row_metadata_state.setdefault(row_key, {})
+
+            date_display_value = str(row_values.get("date", "") or "").strip()
+            if not date_display_value:
+                raw_digits = str(row_state.get("date_digits", "") or "")
+                if not raw_digits:
+                    try:
+                        raw_digits = datetime.fromtimestamp(Path(row_key).stat().st_mtime).strftime("%Y%m%d")
+                    except Exception:
+                        raw_digits = ""
+                    row_state["date_digits"] = raw_digits
+                normalized_digits, normalized_text = normalize_date_input(raw_digits)
+                row_state["date_digits"] = normalized_digits
+                row_state["date_iso"] = normalized_text if len(normalized_text) == 10 else ""
+                date_display_value = normalized_text
+
+            doc_type_display_value = str(row_values.get("document_type", "") or "").strip()
+            if not doc_type_display_value:
+                preferred_doc_type = "계약서"
+                doc_type_display_value = preferred_doc_type if preferred_doc_type in document_type_options else (document_type_options[0] if document_type_options else "기타")
+                row_state["document_type"] = doc_type_display_value
+
+            tag_display_value = str(row_values.get("tags", "") or "")
+
+            date_var = tk.StringVar(value=date_display_value)
             date_entry_width = max(52, date_col_width - 12)
-            date_entry = tk.Entry(
+            date_input = RoundedInput(
                 row_canvas,
                 textvariable=date_var,
+                placeholder="",
+                width=date_entry_width,
+                height=28,
+                corner_radius=8,
                 font=app._font(11),
+                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                placeholder_color=SF_TEXT_PLACEHOLDER,
+                background=row_bg_color,
+                fill=row_bg_color,
+                border_color=SF_BORDER_INPUT,
+                focus_fill=row_bg_color,
+                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                disabled_fill=row_bg_color,
+                disabled_foreground=SF_TEXT_MUTED,
+                state="normal",
+            )
+            date_entry = date_input.entry
+            date_entry.configure(
                 justify="center",
-                bd=0,
-                relief="flat",
-                highlightthickness=1,
-                highlightbackground=SF_BORDER_INPUT,
-                highlightcolor=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
-                bg=row_bg_color,
                 fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
                 insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
             )
+            date_entry.grid_configure(padx=(6, 30))
+            date_input.set(date_display_value)
+            date_input._refresh_visual_state(redraw=True)
+
+            date_calendar_icon = row_calendar_icon_light if row_selected else row_calendar_icon_dark
+            if date_calendar_icon is not None:
+                date_calendar_label = tk.Label(
+                    date_input,
+                    image=date_calendar_icon,
+                    bg=row_bg_color,
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                )
+                date_calendar_label.image = date_calendar_icon
+                date_calendar_label.place(relx=1.0, rely=0.5, x=-10, y=0, anchor="e")
+                date_calendar_label.bind("<Button-1>", lambda _event: "break", add="+")
 
             def on_date_key_release(_event, row_key=row_key, var=date_var, entry_widget=date_entry):
                 normalized_digits, normalized_text = normalize_date_input(var.get())
@@ -2356,69 +2621,215 @@ def show_save_files_screen(app):
                 entry_widget.icursor(tk.END)
 
             date_entry.bind("<KeyRelease>", on_date_key_release)
+            def on_date_focus_click(_event=None, widget=date_input):
+                widget.focus_input()
+                return "break"
+
+            date_input.bind("<Button-1>", on_date_focus_click)
+            date_entry.bind("<Button-1>", on_date_focus_click)
+            app._save_files_row_date_entries.append(date_entry)
             row_canvas.create_window(
                 date_col_left + (date_col_width / 2.0),
                 table_row_height // 2,
-                window=date_entry,
+                window=date_input,
                 width=date_entry_width,
-                height=22,
+                height=28,
                 anchor="center",
             )
+            # Re-apply once mapped to avoid delayed text paint in canvas-embedded rows.
+            app.root.after_idle(
+                lambda widget=date_input, value=date_display_value, entry_widget=date_entry: (
+                    widget.set(value),
+                    widget._refresh_visual_state(redraw=True),
+                    entry_widget.icursor(tk.END),
+                )
+            )
 
-            doc_type_var = tk.StringVar(value=row_values["document_type"])
-            doc_combo = ttk.Combobox(
+            doc_type_var = tk.StringVar(value=doc_type_display_value)
+            doc_input_width = max(56, doc_col_width - 10)
+            doc_type_input = RoundedInput(
                 row_canvas,
                 textvariable=doc_type_var,
-                values=document_type_options,
-                state="readonly",
-                style=row_combo_style_name,
-                justify="center",
+                placeholder="",
+                width=doc_input_width,
+                height=28,
+                corner_radius=8,
                 font=app._font(10),
+                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                placeholder_color=SF_TEXT_PLACEHOLDER,
+                background=row_bg_color,
+                fill=row_bg_color,
+                border_color=SF_BORDER_INPUT,
+                focus_fill=row_bg_color,
+                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                disabled_fill=row_bg_color,
+                disabled_foreground=SF_TEXT_MUTED,
+                state="normal",
             )
-            doc_combo.configure(width=max(6, int((doc_col_width - 10) / 11)))
-
-            def on_doc_combo_selected(_event, row_key=row_key, var=doc_type_var):
-                row_metadata_state.setdefault(row_key, {})["document_type"] = var.get().strip() or "기타"
-
-            doc_combo.bind("<<ComboboxSelected>>", on_doc_combo_selected)
-            row_canvas.create_window(
-                doc_col_left + (doc_col_width / 2.0),
-                table_row_height // 2,
-                window=doc_combo,
-                width=max(56, doc_col_width - 10),
-                height=22,
-                anchor="center",
-            )
-
-            tag_var = tk.StringVar(value=row_values["tags"])
-            tag_entry = tk.Entry(
-                row_canvas,
-                textvariable=tag_var,
-                font=app._font(11),
-                justify="left",
-                bd=0,
-                relief="flat",
-                highlightthickness=1,
-                highlightbackground=SF_BORDER_INPUT,
-                highlightcolor=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
-                bg=row_bg_color,
+            doc_type_entry = doc_type_input.entry
+            doc_type_entry.configure(
+                justify="center",
                 fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
                 insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
             )
+            doc_type_entry.grid_configure(padx=(6, 30))
+            doc_type_input.set(doc_type_display_value)
+            doc_type_input._refresh_visual_state(redraw=True)
+
+            row_doc_expand_icon = row_expand_icon_light if row_selected else row_expand_icon_dark
+            if row_doc_expand_icon is not None:
+                doc_expand_label = tk.Label(
+                    doc_type_input,
+                    image=row_doc_expand_icon,
+                    bg=row_bg_color,
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                )
+                doc_expand_label.image = row_doc_expand_icon
+                doc_expand_label.place(relx=1.0, rely=0.5, x=-10, y=0, anchor="e")
+            else:
+                doc_expand_label = tk.Label(
+                    doc_type_input,
+                    text="▾",
+                    bg=row_bg_color,
+                    fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                    font=app._font(9, "bold"),
+                )
+                doc_expand_label.place(relx=1.0, rely=0.5, x=-10, y=0, anchor="e")
+
+            set_row_doc_expand_icon(doc_expand_label, row_selected, False)
+
+            def on_doc_type_change(*_args, row_key=row_key, var=doc_type_var):
+                row_metadata_state.setdefault(row_key, {})["document_type"] = var.get().strip() or "기타"
+
+            doc_type_var.trace_add("write", on_doc_type_change)
+            doc_type_entry.bind("<KeyPress>", lambda _event: "break", add="+")
+
+            def on_doc_type_open(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=row_selected):
+                app.root.after_idle(lambda: open_row_doc_type_popup(field, key, var, icon, selected))
+                return "break"
+
+            def on_doc_expand_click(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=row_selected):
+                app.root.after_idle(lambda: open_row_doc_type_popup(field, key, var, icon, selected))
+                return "break"
+
+            # Override widget-level click handlers for deterministic row dropdown behavior.
+            doc_type_input.bind("<Button-1>", on_doc_type_open)
+            doc_type_entry.bind("<Button-1>", on_doc_type_open)
+            doc_expand_label.bind("<Button-1>", on_doc_expand_click)
+            row_canvas.create_window(
+                doc_col_left + (doc_col_width / 2.0),
+                table_row_height // 2,
+                window=doc_type_input,
+                width=doc_input_width,
+                height=28,
+                anchor="center",
+            )
+            app.root.after_idle(
+                lambda widget=doc_type_input, value=doc_type_display_value, entry_widget=doc_type_entry: (
+                    widget.set(value),
+                    widget._refresh_visual_state(redraw=True),
+                    entry_widget.icursor(tk.END),
+                )
+            )
+
+            tag_var = tk.StringVar(value=tag_display_value)
+            tag_input = RoundedInput(
+                row_canvas,
+                textvariable=tag_var,
+                placeholder="",
+                width=max(56, tags_col_width - 10),
+                height=28,
+                corner_radius=8,
+                font=app._font(11),
+                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                placeholder_color=SF_TEXT_PLACEHOLDER,
+                background=row_bg_color,
+                fill=row_bg_color,
+                border_color=SF_BORDER_INPUT,
+                focus_fill=row_bg_color,
+                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                disabled_fill=row_bg_color,
+                disabled_foreground=SF_TEXT_MUTED,
+                state="normal",
+            )
+            tag_entry = tag_input.entry
+            tag_entry.configure(
+                justify="left",
+                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+            )
+            tag_entry.grid_configure(padx=(6, 8))
+            tag_input.set(tag_display_value)
+            tag_input._refresh_visual_state(redraw=True)
 
             def on_tag_key_release(_event, row_key=row_key, var=tag_var, entry_widget=tag_entry):
                 row_metadata_state.setdefault(row_key, {})["tags"] = var.get()
                 entry_widget.icursor(tk.END)
 
             tag_entry.bind("<KeyRelease>", on_tag_key_release)
+            def on_tag_focus_click(_event=None, widget=tag_input):
+                widget.focus_input()
+                return "break"
+
+            tag_input.bind("<Button-1>", on_tag_focus_click)
+            tag_entry.bind("<Button-1>", on_tag_focus_click)
+            app._save_files_row_tag_entries.append(tag_entry)
             row_canvas.create_window(
                 tags_col_left + (tags_col_width / 2.0),
                 table_row_height // 2,
-                window=tag_entry,
+                window=tag_input,
                 width=max(56, tags_col_width - 10),
-                height=22,
+                height=28,
                 anchor="center",
             )
+            app.root.after_idle(
+                lambda widget=tag_input, value=tag_display_value, entry_widget=tag_entry: (
+                    widget.set(value),
+                    widget._refresh_visual_state(redraw=True),
+                    entry_widget.icursor(tk.END),
+                )
+            )
+
+            def on_row_canvas_click(
+                event,
+                key=row_key,
+                date_left=date_col_left,
+                date_width=date_col_width,
+                doc_left=doc_col_left,
+                doc_width=doc_col_width,
+                tags_left=tags_col_left,
+                tags_width=tags_col_width,
+                date_widget=date_input,
+                doc_widget=doc_type_input,
+                tag_widget=tag_input,
+                doc_var=doc_type_var,
+                doc_icon=doc_expand_label,
+                selected=row_selected,
+            ):
+                date_right = date_left + date_width
+                doc_right = doc_left + doc_width
+                tags_right = tags_left + tags_width
+
+                if date_left <= event.x <= date_right:
+                    date_widget.focus_input()
+                    return "break"
+
+                if doc_left <= event.x <= doc_right:
+                    app.root.after_idle(lambda: open_row_doc_type_popup(doc_widget, key, doc_var, doc_icon, selected))
+                    return "break"
+
+                if tags_left <= event.x <= tags_right:
+                    tag_widget.focus_input()
+                    return "break"
+
+                return select_row_item(key, event)
+
+            row_canvas.bind("<Button-1>", on_row_canvas_click, add="+")
 
             row_canvas.create_text(local_col_centers[5], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(11), anchor="center")
 

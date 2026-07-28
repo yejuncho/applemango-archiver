@@ -4,6 +4,15 @@ import applemango_dms.config as config
 from applemango_dms.ui.workplace_menu import build_sidebar_nav
 from applemango_dms.ui.widgets import RoundedInput
 
+try:
+    from PIL import Image, ImageDraw, ImageTk
+    _PIL_AVAILABLE = True
+except Exception:
+    Image = None
+    ImageDraw = None
+    ImageTk = None
+    _PIL_AVAILABLE = False
+
 from applemango_dms.ui import colors
 from applemango_dms.utils.images import load_svg_photo
 
@@ -13,6 +22,7 @@ SF_SEARCH_BOX_BORDER = "#5C667F"
 SF_SURFACE_HOVER_SOFT = colors.SURFACE_HOVER_SOFT
 SF_STATUS_PROCESSING = colors.PROCESSING
 SF_TEXT_DARK = colors.TEXT_NEUTRAL_DARK
+SF_TEXT_MAIN = colors.TEXT_EMPHASIS
 SF_STATUS_FAILED = colors.FAILED_STRONG
 SF_TEXT_PLACEHOLDER = colors.TEXT_PLACEHOLDER
 SF_PRIMARY = colors.PRIMARY
@@ -64,6 +74,7 @@ def show_search_files_screen(app):
     right_card.grid(row=0, column=1, sticky="nsew")
 
     search_placeholder_text = "파일명, 문서 유형, 태그, 업로더 등으로 검색할 수 있어요."
+    search_result_count_var = tk.StringVar(value="검색 결과 (#건)")
     search_var = tk.StringVar(value="")
     search_box_inset = 15
     search_box_height = 48
@@ -172,6 +183,8 @@ def show_search_files_screen(app):
     dropdown_state = {
         "doc_type_expanded": False,
         "file_type_expanded": False,
+        "doc_type_popup": None,
+        "file_type_popup": None,
     }
 
     filter_panel_state = {
@@ -188,6 +201,23 @@ def show_search_files_screen(app):
         "retry_job": None,
     }
 
+    result_table_state = {
+        "select_all_checked": False,
+    }
+
+    result_table_icons = {
+        "unchecked": load_svg_photo(
+            config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "search_files" / "unchecked.svg",
+            max_width=14,
+            max_height=14,
+        ),
+        "checked": load_svg_photo(
+            config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "search_files" / "checked.svg",
+            max_width=14,
+            max_height=14,
+        ),
+    }
+
     def _is_descendant_of(widget, ancestor):
         current = widget
         while current is not None:
@@ -197,6 +227,11 @@ def show_search_files_screen(app):
         return False
 
     def _on_click_outside_search_box(event):
+        for popup_key in ("doc_type_popup", "file_type_popup"):
+            popup = dropdown_state.get(popup_key)
+            if popup is not None and popup.winfo_exists() and _is_descendant_of(event.widget, popup):
+                return
+
         input_ancestors = [
             search_box_holder,
             date_from_field["canvas"],
@@ -204,8 +239,6 @@ def show_search_files_screen(app):
             doc_type_field["canvas"],
             file_type_field["canvas"],
             uploader_field["canvas"],
-            doc_type_dropdown_frame,
-            file_type_dropdown_frame,
             date_quick_row,
         ]
         for ancestor in input_ancestors:
@@ -223,6 +256,9 @@ def show_search_files_screen(app):
         }
         if focused in editable_widgets:
             board.focus_set()
+
+        _close_dropdown_popup("doc_type")
+        _close_dropdown_popup("file_type")
 
     def _start_search_placeholder():
         search_text_entry.focus_set()
@@ -370,6 +406,60 @@ def show_search_files_screen(app):
         canvas.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=border_width)
         canvas.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=border_width)
 
+    def _color_to_rgb(color_value):
+        r16, g16, b16 = app.root.winfo_rgb(color_value)
+        return (r16 // 256, g16 // 256, b16 // 256)
+
+    def _draw_dropdown_shell(canvas, width, height, *, radius=10, border_width=1):
+        canvas.delete("dropdown_shell")
+        width = max(2, int(width))
+        height = max(2, int(height))
+
+        if _PIL_AVAILABLE:
+            scale = 4
+            sw = width * scale
+            sh = height * scale
+            sr = max(0, int(round(radius * scale)))
+            sbw = max(1, int(round(border_width * scale)))
+
+            bg_rgb = _color_to_rgb(colors.SURFACE_ALT)
+            fill_rgb = _color_to_rgb(colors.SURFACE_ALT)
+            border_rgb = _color_to_rgb(SF_INPUT_IDLE_BORDER)
+
+            image = Image.new("RGBA", (sw, sh), (bg_rgb[0], bg_rgb[1], bg_rgb[2], 255))
+            draw = ImageDraw.Draw(image)
+            draw.rounded_rectangle([0, 0, sw - 1, sh - 1], radius=sr, fill=(border_rgb[0], border_rgb[1], border_rgb[2], 255))
+            draw.rounded_rectangle(
+                [sbw, sbw, sw - 1 - sbw, sh - 1 - sbw],
+                radius=max(0, sr - sbw),
+                fill=(fill_rgb[0], fill_rgb[1], fill_rgb[2], 255),
+            )
+
+            try:
+                resample_mode = Image.Resampling.LANCZOS
+            except Exception:
+                resample_mode = Image.LANCZOS
+
+            downsampled = image.resize((width, height), resample=resample_mode)
+            photo = ImageTk.PhotoImage(downsampled, master=canvas)
+            canvas._dropdown_shell_photo = photo
+            canvas.create_image(0, 0, anchor="nw", image=photo, tags=("dropdown_shell",))
+            return
+
+        # Fallback: smooth rounded rect from app helper.
+        app._smooth_rounded_rect(
+            canvas,
+            1,
+            1,
+            width - 1,
+            height - 1,
+            radius,
+            fill=colors.SURFACE_ALT,
+            outline=SF_INPUT_IDLE_BORDER,
+            width=1,
+            tags="dropdown_shell",
+        )
+
     def _create_rounded_input(
         parent,
         text_var,
@@ -505,6 +595,105 @@ def show_search_files_screen(app):
         toggle_widget.icon_label.configure(image=icon, text=fallback if icon is None else "")
         toggle_widget.image = icon
 
+    def _close_dropdown_popup(kind):
+        popup_key = f"{kind}_popup"
+        expanded_key = f"{kind}_expanded"
+        popup = dropdown_state.get(popup_key)
+        if popup is not None and popup.winfo_exists():
+            popup.destroy()
+        dropdown_state[popup_key] = None
+        dropdown_state[expanded_key] = False
+
+    def _open_dropdown_popup(kind, field, options, value_var):
+        popup_key = f"{kind}_popup"
+        expanded_key = f"{kind}_expanded"
+
+        _close_dropdown_popup(kind)
+
+        popup_width = max(120, int(field["canvas"].winfo_width()))
+        popup_rows = max(1, min(5, len(options)))
+        popup_height = (popup_rows * 28) + 12
+        popup_x = field["canvas"].winfo_rootx()
+        popup_y = field["canvas"].winfo_rooty() + field["canvas"].winfo_height() + 2
+
+        popup = tk.Toplevel(app.root)
+        popup.overrideredirect(True)
+        popup.transient(app.root)
+        popup.configure(bg=colors.SURFACE_ALT)
+        popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+        popup.lift()
+        popup.focus_force()
+
+        shell_canvas = tk.Canvas(popup, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+        shell_canvas.pack(fill="both", expand=True)
+
+        inner_pad = 2
+        _draw_dropdown_shell(shell_canvas, popup_width, popup_height, radius=10, border_width=1)
+
+        def _on_shell_resize(event):
+            _draw_dropdown_shell(shell_canvas, event.width, event.height, radius=10, border_width=1)
+
+        shell_canvas.bind("<Configure>", _on_shell_resize, add="+")
+
+        body = tk.Frame(
+            shell_canvas,
+            bg=colors.SURFACE_ALT,
+            bd=0,
+            highlightthickness=0,
+        )
+        shell_canvas.create_window(
+            inner_pad,
+            inner_pad,
+            anchor="nw",
+            window=body,
+            width=max(1, popup_width - (inner_pad * 2)),
+            height=max(1, popup_height - (inner_pad * 2)),
+        )
+
+        listbox = tk.Listbox(
+            body,
+            height=popup_rows,
+            activestyle="none",
+            selectmode="browse",
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+            bg=colors.SURFACE_ALT,
+            fg=SF_TEXT_DARK,
+            font=app._font(11),
+            selectbackground=SF_PRIMARY,
+            selectforeground=colors.TEXT_INVERSE,
+            exportselection=False,
+        )
+        listbox.pack(fill="both", expand=True)
+
+        for option in options:
+            listbox.insert(tk.END, option)
+
+        current_value = (value_var.get() or "").strip()
+        if current_value in options:
+            current_index = options.index(current_value)
+            listbox.selection_set(current_index)
+            listbox.see(current_index)
+
+        def _commit_selection(_event=None):
+            selection = listbox.curselection()
+            if not selection:
+                return "break"
+            chosen = listbox.get(selection[0])
+            value_var.set(chosen)
+            _close_dropdown_popup(kind)
+            return "break"
+
+        listbox.bind("<ButtonRelease-1>", _commit_selection)
+        listbox.bind("<Double-Button-1>", _commit_selection)
+        listbox.bind("<Return>", _commit_selection)
+        popup.bind("<Escape>", lambda _event: _close_dropdown_popup(kind))
+        popup.after(0, lambda: listbox.focus_set())
+
+        dropdown_state[popup_key] = popup
+        dropdown_state[expanded_key] = True
+
     def _layout_filter_row():
         row_width = max(140, left_top_card.winfo_width() - (search_box_inset * 2))
         row_height = filter_row_height
@@ -526,24 +715,20 @@ def show_search_files_screen(app):
         filter_content_inner.place(x=0, y=0, width=content_width, height=filter_content_height)
 
     def _toggle_doc_type_dropdown():
-        dropdown_state["doc_type_expanded"] = not dropdown_state["doc_type_expanded"]
         if dropdown_state["doc_type_expanded"]:
-            doc_type_dropdown_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
-            dropdown_state["file_type_expanded"] = False
-            file_type_dropdown_frame.grid_forget()
+            _close_dropdown_popup("doc_type")
         else:
-            doc_type_dropdown_frame.grid_forget()
+            _close_dropdown_popup("file_type")
+            _open_dropdown_popup("doc_type", doc_type_field, doc_type_options, doc_type_var)
         _set_dropdown_icon(doc_type_field["toggle"], dropdown_state["doc_type_expanded"])
         _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
 
     def _toggle_file_type_dropdown():
-        dropdown_state["file_type_expanded"] = not dropdown_state["file_type_expanded"]
         if dropdown_state["file_type_expanded"]:
-            file_type_dropdown_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
-            dropdown_state["doc_type_expanded"] = False
-            doc_type_dropdown_frame.grid_forget()
+            _close_dropdown_popup("file_type")
         else:
-            file_type_dropdown_frame.grid_forget()
+            _close_dropdown_popup("doc_type")
+            _open_dropdown_popup("file_type", file_type_field, file_type_options, file_type_var)
         _set_dropdown_icon(doc_type_field["toggle"], dropdown_state["doc_type_expanded"])
         _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
 
@@ -551,6 +736,7 @@ def show_search_files_screen(app):
         _draw_card(left_top_card, bottom_shrink=0)
         _draw_card(left_bottom_card, bottom_shrink=12)
         _draw_card(right_card, bottom_shrink=12)
+        _draw_results_table()
         _draw_search_box()
         _layout_filter_row()
         _layout_filter_content()
@@ -709,63 +895,6 @@ def show_search_files_screen(app):
     uploader_field["canvas"].grid(row=1, column=0, sticky="ew", padx=(2, 6))
     _align_rounded_placeholder(uploader_field, left_pad=6, right_pad=8)
 
-    doc_type_dropdown_frame = tk.Frame(doc_type_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
-    doc_type_listbox = tk.Listbox(
-        doc_type_dropdown_frame,
-        height=6,
-        activestyle="none",
-        selectmode="browse",
-        bd=0,
-        highlightthickness=1,
-        highlightbackground=SF_SEARCH_BOX_BORDER,
-        relief="flat",
-        bg=colors.SURFACE_ALT,
-        fg=SF_TEXT_DARK,
-        font=app._font(10),
-        exportselection=False,
-    )
-    for option in doc_type_options:
-        doc_type_listbox.insert(tk.END, option)
-    doc_type_listbox.pack(fill="x")
-
-    file_type_dropdown_frame = tk.Frame(file_type_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
-    file_type_listbox = tk.Listbox(
-        file_type_dropdown_frame,
-        height=6,
-        activestyle="none",
-        selectmode="browse",
-        bd=0,
-        highlightthickness=1,
-        highlightbackground=SF_SEARCH_BOX_BORDER,
-        relief="flat",
-        bg=colors.SURFACE_ALT,
-        fg=SF_TEXT_DARK,
-        font=app._font(10),
-        exportselection=False,
-    )
-    for option in file_type_options:
-        file_type_listbox.insert(tk.END, option)
-    file_type_listbox.pack(fill="x")
-
-    def _on_pick_doc_type(_event=None):
-        selected = doc_type_listbox.curselection()
-        if not selected:
-            return
-        doc_type_var.set(doc_type_listbox.get(selected[0]))
-        if dropdown_state["doc_type_expanded"]:
-            _toggle_doc_type_dropdown()
-
-    def _on_pick_file_type(_event=None):
-        selected = file_type_listbox.curselection()
-        if not selected:
-            return
-        file_type_var.set(file_type_listbox.get(selected[0]))
-        if dropdown_state["file_type_expanded"]:
-            _toggle_file_type_dropdown()
-
-    doc_type_listbox.bind("<<ListboxSelect>>", _on_pick_doc_type)
-    file_type_listbox.bind("<<ListboxSelect>>", _on_pick_file_type)
-
     def _bind_date_entry(entry_widget, value_var):
         def on_focus_in(_event):
             return None
@@ -908,6 +1037,180 @@ def show_search_files_screen(app):
             width=1,
         )
 
+    def _draw_results_table():
+        card_canvas = left_bottom_card
+        card_width = max(100, card_canvas.winfo_width())
+        full_height = max(100, card_canvas.winfo_height())
+        card_height = max(100, full_height - 12)
+
+        row_weights = [10.0, 7.5, 72.5, 10.0]
+        row_colors = [colors.SURFACE_ALT, colors.SURFACE_ACCENT_SOFT, colors.SURFACE_ALT, colors.SURFACE_ALT]
+
+        inner_padding = 8
+        inner_x1, inner_y1 = inner_padding, inner_padding
+        inner_x2, inner_y2 = card_width - inner_padding, card_height - inner_padding
+        inner_height = max(1, inner_y2 - inner_y1)
+
+        collapsed_top_height, _expanded_top_height, available_height = _compute_left_top_targets()
+        baseline_bottom_height = max(1, int(available_height - collapsed_top_height))
+        baseline_card_height = max(1, baseline_bottom_height - 12)
+        baseline_inner_height = max(1, baseline_card_height - (inner_padding * 2))
+
+        fixed_row1 = max(1, int(baseline_inner_height * (row_weights[0] / 100.0)))
+        fixed_row2 = max(1, int(baseline_inner_height * (row_weights[1] / 100.0)))
+        fixed_row4 = max(1, int(baseline_inner_height * (row_weights[3] / 100.0)))
+        fixed_total = fixed_row1 + fixed_row2 + fixed_row4
+        row3_height = max(1, inner_height - fixed_total)
+
+        row_heights = [fixed_row1, fixed_row2, row3_height, fixed_row4]
+
+        y_cursor = inner_y1
+        divider_y = []
+        for idx, row_height in enumerate(row_heights):
+            y_next = y_cursor + row_height
+            card_canvas.create_rectangle(
+                inner_x1,
+                y_cursor,
+                inner_x2,
+                y_next,
+                fill=row_colors[idx],
+                outline="",
+            )
+            if idx < len(row_heights) - 1:
+                divider_y.append(y_next)
+            y_cursor = y_next
+
+        for y in divider_y:
+            card_canvas.create_line(inner_x1, y, inner_x2, y, fill=SF_BORDER, width=1)
+
+        row1_top = inner_y1
+        row1_bottom = row1_top + row_heights[0]
+        row1_center_y = (row1_top + row1_bottom) // 2
+        card_canvas.create_text(
+            inner_x1 + 10,
+            row1_center_y,
+            text=search_result_count_var.get(),
+            fill=SF_TEXT_MAIN,
+            font=app._font(14, "bold"),
+            anchor="w",
+        )
+
+        table_col_widths_pct = [5.0, 25.0, 10.0, 15.0, 10.0, 15.0, 5.0, 10.0, 5.0]
+        row2_headers = [
+            "",
+            "문서명",
+            "문서 유형",
+            "문서 날짜",
+            "업로더",
+            "업로드 날짜",
+            "크기",
+            "파일 종류",
+            "",
+        ]
+
+        row2_top = row1_bottom
+        row2_bottom = row2_top + row_heights[1]
+        row2_center_y = (row2_top + row2_bottom) // 2
+        row2_inner_x1 = inner_x1 + 2
+        row2_inner_x2 = inner_x2 - 2
+        row2_inner_width = max(1, row2_inner_x2 - row2_inner_x1)
+
+        col_width_px = [int(row2_inner_width * (pct / 100.0)) for pct in table_col_widths_pct]
+        col_width_px[-1] += max(0, row2_inner_width - sum(col_width_px))
+
+        col_starts = []
+        cursor_px = row2_inner_x1
+        for width_px in col_width_px:
+            col_starts.append(cursor_px)
+            cursor_px += width_px
+
+        col_centers = []
+        x_cursor = row2_inner_x1
+        for width_px in col_width_px:
+            col_centers.append(x_cursor + (width_px / 2.0))
+            x_cursor += width_px
+
+        select_tag = "sf_result_select_all"
+        unchecked_icon = result_table_icons.get("unchecked")
+        checked_icon = result_table_icons.get("checked")
+
+        def _update_select_all_icon():
+            icon_checked = bool(result_table_state.get("select_all_checked", False))
+            if select_icon_id is not None:
+                next_icon = checked_icon if icon_checked else unchecked_icon
+                if next_icon is not None:
+                    card_canvas.itemconfigure(select_icon_id, image=next_icon)
+            elif select_text_id is not None:
+                card_canvas.itemconfigure(select_text_id, text="☑" if icon_checked else "□")
+
+        def _toggle_select_all(_event=None):
+            result_table_state["select_all_checked"] = not bool(result_table_state.get("select_all_checked", False))
+            _update_select_all_icon()
+            return "break"
+
+        select_icon_id = None
+        select_text_id = None
+        if unchecked_icon is not None:
+            select_icon_id = card_canvas.create_image(
+                col_centers[0],
+                row2_center_y,
+                image=unchecked_icon,
+                anchor="center",
+                tags=(select_tag,),
+            )
+        else:
+            select_text_id = card_canvas.create_text(
+                col_centers[0],
+                row2_center_y,
+                text="□",
+                fill=SF_TEXT_DARK,
+                font=app._font(12, "bold"),
+                anchor="center",
+                tags=(select_tag,),
+            )
+
+        col1_x1 = row2_inner_x1
+        col1_x2 = row2_inner_x1 + col_width_px[0]
+        card_canvas.create_rectangle(
+            col1_x1,
+            row2_top,
+            col1_x2,
+            row2_bottom,
+            fill="",
+            outline="",
+            tags=(select_tag,),
+        )
+
+        card_canvas.tag_bind(select_tag, "<Button-1>", _toggle_select_all)
+        _update_select_all_icon()
+
+        for idx, header_text in enumerate(row2_headers):
+            if idx == 0 or not header_text:
+                continue
+            card_canvas.create_text(
+                col_centers[idx],
+                row2_center_y,
+                text=header_text,
+                fill=SF_TEXT_DARK,
+                font=app._font(10),
+                anchor="center",
+            )
+
+        row3_top = row2_bottom
+        row3_bottom = row3_top + row_heights[2]
+        row3_center_y = (row3_top + row3_bottom) // 2
+        card_canvas.create_text(
+            (inner_x1 + inner_x2) / 2.0,
+            row3_center_y,
+            text="검색 결과 데이터가 여기에 표시돼요.",
+            fill=SF_TEXT_PLACEHOLDER,
+            font=app._font(11),
+            anchor="center",
+        )
+
+        # Keep icon references alive on the canvas.
+        card_canvas.result_table_icons_ref = result_table_icons
+
     def _draw_search_box():
         bar_width = max(220, left_top_card.winfo_width() - (search_box_inset * 2))
         search_box_holder.place(
@@ -934,6 +1237,12 @@ def show_search_files_screen(app):
     split.bind("<Configure>", _on_layout_change)
     right_card.bind("<Configure>", _on_layout_change)
     left_col.bind("<Configure>", _on_layout_change)
+
+    def _on_screen_destroy(_event=None):
+        _close_dropdown_popup("doc_type")
+        _close_dropdown_popup("file_type")
+
+    left_top_card.bind("<Destroy>", _on_screen_destroy, add="+")
 
     _set_filter_toggle_visuals(False)
     app.root.after_idle(_on_layout_change)
