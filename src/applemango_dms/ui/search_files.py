@@ -1,19 +1,23 @@
 import tkinter as tk
+from datetime import date, timedelta
 import applemango_dms.config as config
 from applemango_dms.ui.workplace_menu import build_sidebar_nav
+from applemango_dms.ui.widgets import RoundedInput
 
 from applemango_dms.ui import colors
 from applemango_dms.utils.images import load_svg_photo
 
 SF_SURFACE = colors.SURFACE_ALT
 SF_BORDER = colors.BORDER_LIGHT
-SF_SEARCH_BOX_BORDER = colors.BORDER_INPUT
+SF_SEARCH_BOX_BORDER = "#5C667F"
 SF_SURFACE_HOVER_SOFT = colors.SURFACE_HOVER_SOFT
 SF_STATUS_PROCESSING = colors.PROCESSING
 SF_TEXT_DARK = colors.TEXT_NEUTRAL_DARK
 SF_STATUS_FAILED = colors.FAILED_STRONG
 SF_TEXT_PLACEHOLDER = colors.TEXT_PLACEHOLDER
 SF_PRIMARY = colors.PRIMARY
+SF_INPUT_IDLE_BORDER = colors.BORDER
+SF_INPUT_FOCUS_BORDER = colors.PRIMARY_PRESSED
 
 def show_search_files_screen(app):
     shell = app._create_workspace_shell()
@@ -45,8 +49,8 @@ def show_search_files_screen(app):
 
     split = tk.Frame(board, bg=SF_SURFACE)
     split.pack(fill="both", expand=True, padx=gap, pady=0)
-    split.grid_columnconfigure(0, weight=4, uniform="search_cols")
-    split.grid_columnconfigure(1, weight=1, uniform="search_cols")
+    split.grid_columnconfigure(0, weight=39, uniform="search_cols")
+    split.grid_columnconfigure(1, weight=11, uniform="search_cols")
     split.grid_rowconfigure(0, weight=1)
 
     left_col = tk.Frame(split, bg=SF_SURFACE, highlightthickness=0, bd=0)
@@ -65,23 +69,11 @@ def show_search_files_screen(app):
     search_box_height = 48
     filter_row_top_gap = 10
     filter_row_height = 30
+    filter_content_top_gap = 8
+    filter_content_height = 228
+    filter_content_bottom_padding = 14
 
-    search_box_canvas = tk.Canvas(left_top_card, bg=SF_SURFACE, highlightthickness=0, bd=0)
-    search_box_inner = tk.Frame(search_box_canvas, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
-    search_box_inner.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-    search_text_entry = tk.Entry(
-        search_box_inner,
-        textvariable=search_var,
-        bd=0,
-        relief="flat",
-        highlightthickness=0,
-        bg=colors.SURFACE_ALT,
-        fg=SF_TEXT_DARK,
-        insertbackground=SF_TEXT_DARK,
-        font=app._font(11),
-        cursor="xterm",
-    )
+    search_box_holder = tk.Frame(left_top_card, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
 
     icon_size = 20
     icon_gap = 4
@@ -106,8 +98,17 @@ def show_search_files_screen(app):
         max_width=18,
         max_height=18,
     )
+    to_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "search_files" / "to.svg",
+        max_width=14,
+        max_height=14,
+    )
+    calendar_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "search_files" / "calendar.svg",
+        max_width=14,
+        max_height=14,
+    )
 
-    icon_row = tk.Frame(search_box_inner, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
     filter_row = tk.Frame(left_top_card, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
     filter_label = tk.Label(
         filter_row,
@@ -117,8 +118,62 @@ def show_search_files_screen(app):
         font=app._font(11, "bold"),
         anchor="w",
     )
+    filter_content_clip = tk.Frame(left_top_card, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    filter_content_inner = tk.Frame(filter_content_clip, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
 
-    placeholder_state = {"active": False}
+    filter_column_specs = [
+        ("문서 날짜", 18),
+        ("문서 유형", 9),
+        ("파일 종류", 9),
+        ("업로드한 사람", 9),
+    ]
+
+    filter_content_inner.grid_rowconfigure(0, weight=1)
+    for idx, (_title, weight) in enumerate(filter_column_specs):
+        filter_content_inner.grid_columnconfigure(idx, weight=weight, uniform="filter_cols")
+
+    filter_col_frames = []
+    for idx, (title, _weight) in enumerate(filter_column_specs):
+        col_frame = tk.Frame(filter_content_inner, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+        col_frame.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 8, 0), pady=(0, 0))
+        col_frame.grid_columnconfigure(0, weight=1)
+
+        header_label = tk.Label(
+            col_frame,
+            text=title,
+            bg=colors.SURFACE_ALT,
+            fg=SF_TEXT_DARK,
+            font=app._font(10, "bold"),
+            anchor="w",
+            justify="left",
+        )
+        header_label.grid(row=0, column=0, sticky="w", padx=(2, 0), pady=(0, 8))
+        filter_col_frames.append(col_frame)
+
+    date_from_var = tk.StringVar(value="")
+    date_to_var = tk.StringVar(value="")
+    doc_type_var = tk.StringVar(value="")
+    file_type_var = tk.StringVar(value="")
+    uploader_var = tk.StringVar(value="")
+
+    doc_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
+    file_type_options = [
+        ".doc", ".docx", ".txt", ".pdf", ".xls", ".xlsx", ".xlsm", ".csv", ".ppt", ".pptx", ".pptm",
+        ".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".webp", ".svg",
+        ".zip", ".7z", ".rar", ".tar", ".gz",
+        ".mp4", ".mov", ".avi", ".wmv", ".mkv",
+        ".mp3", ".wma", ".m4a",
+        ".exe", ".msi", ".bat", ".cmd",
+        ".psd", ".ai", ".indd", ".xd",
+        ".db", ".sqlite", ".mdb", ".accdb",
+        ".html", ".htm",
+    ]
+
+    dropdown_state = {
+        "doc_type_expanded": False,
+        "file_type_expanded": False,
+    }
+
     filter_panel_state = {
         "expanded": False,
         "target_expanded": False,
@@ -133,26 +188,6 @@ def show_search_files_screen(app):
         "retry_job": None,
     }
 
-    def _set_placeholder_text():
-        placeholder_state["active"] = True
-        search_var.set(search_placeholder_text)
-        search_text_entry.config(fg=SF_TEXT_PLACEHOLDER)
-
-    def _clear_placeholder_if_needed():
-        if not placeholder_state["active"]:
-            return
-        placeholder_state["active"] = False
-        search_var.set("")
-        search_text_entry.config(fg=SF_TEXT_DARK)
-
-    def _on_entry_focus_in(_event):
-        _clear_placeholder_if_needed()
-
-    def _on_entry_focus_out(_event):
-        if search_var.get().strip():
-            return
-        _set_placeholder_text()
-
     def _is_descendant_of(widget, ancestor):
         current = widget
         while current is not None:
@@ -162,22 +197,120 @@ def show_search_files_screen(app):
         return False
 
     def _on_click_outside_search_box(event):
-        if _is_descendant_of(event.widget, search_box_canvas):
-            return
-        if app.root.focus_get() is search_text_entry:
+        input_ancestors = [
+            search_box_holder,
+            date_from_field["canvas"],
+            date_to_field["canvas"],
+            doc_type_field["canvas"],
+            file_type_field["canvas"],
+            uploader_field["canvas"],
+            doc_type_dropdown_frame,
+            file_type_dropdown_frame,
+            date_quick_row,
+        ]
+        for ancestor in input_ancestors:
+            if _is_descendant_of(event.widget, ancestor):
+                return
+
+        focused = app.root.focus_get()
+        editable_widgets = {
+            search_text_entry,
+            date_from_field["entry"],
+            date_to_field["entry"],
+            doc_type_field["entry"],
+            file_type_field["entry"],
+            uploader_field["entry"],
+        }
+        if focused in editable_widgets:
             board.focus_set()
-        if not search_var.get().strip():
-            _set_placeholder_text()
 
     def _start_search_placeholder():
-        if placeholder_state["active"]:
-            return
+        search_text_entry.focus_set()
 
     def _clear_search_text():
-        placeholder_state["active"] = False
         search_var.set("")
-        search_text_entry.config(fg=SF_TEXT_DARK)
         search_text_entry.focus_set()
+
+    def is_leap_year(year_value):
+        return (year_value % 4 == 0 and year_value % 100 != 0) or (year_value % 400 == 0)
+
+    def max_day_for_month(year_value, month_value):
+        if month_value in (1, 3, 5, 7, 8, 10, 12):
+            return 31
+        if month_value in (4, 6, 9, 11):
+            return 30
+        if month_value == 2:
+            return 29 if is_leap_year(year_value) else 28
+        return 31
+
+    def normalize_date_input(raw_value):
+        current_year = 9999
+        digits = ''.join(ch for ch in str(raw_value or "") if ch.isdigit())[:8]
+        if not digits:
+            return "", ""
+
+        if len(digits) < 4:
+            return digits, digits
+
+        year_digits = digits[:4]
+        year_int = max(1, min(current_year, int(year_digits)))
+        year_digits = f"{year_int:04d}"
+
+        rest = digits[4:]
+        if not rest:
+            return year_digits, year_digits
+
+        month_display = ""
+        month_digits_for_state = ""
+        day_digits_raw = ""
+
+        if len(rest) == 1:
+            month_display = rest
+            month_digits_for_state = rest
+        else:
+            month_two = rest[:2]
+            month_two_int = int(month_two)
+
+            if 1 <= month_two_int <= 12:
+                month_display = f"{month_two_int:02d}"
+                month_digits_for_state = month_display
+                day_digits_raw = rest[2:4]
+            else:
+                month_one = rest[0]
+                carry_to_day = rest[1:4]
+                if month_one == "0":
+                    month_display = "0"
+                    month_digits_for_state = "0"
+                else:
+                    month_one_int = max(1, min(9, int(month_one)))
+                    month_display = f"{month_one_int:02d}"
+                    month_digits_for_state = month_display
+                day_digits_raw = carry_to_day
+
+        if not month_display:
+            return year_digits, year_digits
+
+        if not day_digits_raw:
+            normalized_digits = year_digits + month_digits_for_state
+            return normalized_digits, f"{year_digits}-{month_display}"
+
+        if len(day_digits_raw) == 1:
+            day_first = int(day_digits_raw)
+            if 4 <= day_first <= 9:
+                day_digits = f"0{day_first}"
+                normalized_digits = year_digits + month_digits_for_state + day_digits
+                return normalized_digits, f"{year_digits}-{month_display}-{day_digits}"
+            normalized_digits = year_digits + month_digits_for_state + day_digits_raw
+            return normalized_digits, f"{year_digits}-{month_display}-{day_digits_raw}"
+
+        month_for_day = int(month_digits_for_state if len(month_digits_for_state) == 2 else month_display)
+        day_int = int(day_digits_raw[:2])
+        max_day = max_day_for_month(year_int, month_for_day)
+        day_int = max(1, min(max_day, day_int))
+        day_digits = f"{day_int:02d}"
+
+        normalized_digits = year_digits + month_digits_for_state + day_digits
+        return normalized_digits, f"{year_digits}-{month_display}-{day_digits}"
 
     def _create_icon_action(parent, icon_photo, fallback_text, command, *, icon_pad=None):
         local_icon_pad = icon_padding if icon_pad is None else icon_pad
@@ -215,6 +348,106 @@ def show_search_files_screen(app):
         wrapper.image = icon_photo
         wrapper.icon_label = label
         return wrapper
+
+    def _draw_plain_rounded_rect(canvas, x1, y1, x2, y2, radius, *, fill, outline, border_width=1):
+        r = max(2, min(int(radius), int((x2 - x1) / 2), int((y2 - y1) / 2)))
+
+        # Fill (no shadow): center strips + corner pies.
+        canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline="")
+        canvas.create_rectangle(x1, y1 + r, x2, y2 - r, fill=fill, outline="")
+        canvas.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style="pieslice", fill=fill, outline="")
+        canvas.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style="pieslice", fill=fill, outline="")
+        canvas.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style="pieslice", fill=fill, outline="")
+        canvas.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style="pieslice", fill=fill, outline="")
+
+        # Outline.
+        canvas.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style="arc", outline=outline, width=border_width)
+        canvas.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style="arc", outline=outline, width=border_width)
+        canvas.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style="arc", outline=outline, width=border_width)
+        canvas.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style="arc", outline=outline, width=border_width)
+        canvas.create_line(x1 + r, y1, x2 - r, y1, fill=outline, width=border_width)
+        canvas.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=border_width)
+        canvas.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=border_width)
+        canvas.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=border_width)
+
+    def _create_rounded_input(
+        parent,
+        text_var,
+        *,
+        placeholder="",
+        with_toggle_icon=False,
+        toggle_command=None,
+        trailing_icon_photo=None,
+        trailing_icon_command=None,
+    ):
+        field_holder = tk.Frame(parent, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+
+        rounded_input = RoundedInput(
+            field_holder,
+            textvariable=text_var,
+            placeholder=placeholder,
+            width=120,
+            height=34,
+            corner_radius=10,
+            font=app._font(10),
+            foreground=SF_TEXT_DARK,
+            placeholder_color=SF_TEXT_PLACEHOLDER,
+            fill=colors.SURFACE_ALT,
+            border_color=SF_INPUT_IDLE_BORDER,
+            focus_fill=colors.SURFACE_ALT,
+            focus_border_color=SF_INPUT_FOCUS_BORDER,
+            disabled_fill=colors.SURFACE_ALT,
+            disabled_foreground=SF_TEXT_PLACEHOLDER,
+            state="normal",
+        )
+        rounded_input.pack(fill="both", expand=True)
+
+        entry = rounded_input.entry
+        entry.configure(justify="left", insertbackground=SF_TEXT_DARK)
+        entry.grid_configure(padx=(6, 8))
+
+        toggle_widget = None
+        trailing_widget = None
+        has_right_icon = False
+
+        if with_toggle_icon and callable(toggle_command):
+            toggle_widget = _create_icon_action(
+                rounded_input,
+                expand_icon_photo,
+                "▾",
+                toggle_command,
+                icon_pad=(1, 1),
+            )
+            toggle_widget.place(relx=1.0, rely=0.5, x=-6, y=0, anchor="e")
+            has_right_icon = True
+
+        if trailing_icon_photo is not None:
+            trailing_widget = _create_icon_action(
+                rounded_input,
+                trailing_icon_photo,
+                "📅",
+                trailing_icon_command if callable(trailing_icon_command) else (lambda: None),
+                icon_pad=(1, 1),
+            )
+            trailing_widget.place(relx=1.0, rely=0.5, x=-6, y=0, anchor="e")
+            has_right_icon = True
+
+        if has_right_icon:
+            entry.grid_configure(padx=(6, 30))
+
+        return {
+            "canvas": field_holder,
+            "entry": entry,
+            "toggle": toggle_widget,
+            "trailing": trailing_widget,
+            "rounded": rounded_input,
+        }
+
+    def _align_rounded_placeholder(field, left_pad, right_pad):
+        rounded = field["rounded"]
+        rounded._placeholder_left_pad_override = int(left_pad)
+        rounded._placeholder_right_pad_override = int(right_pad)
+        rounded._reposition_placeholder()
 
     def _compute_left_top_targets():
         total_height = max(1, left_col.winfo_height())
@@ -266,11 +499,53 @@ def show_search_files_screen(app):
         filter_toggle_icon.icon_label.configure(image=icon, text=fallback if icon is None else "")
         filter_toggle_icon.image = icon
 
+    def _set_dropdown_icon(toggle_widget, expanded):
+        icon = collapse_icon_photo if expanded else expand_icon_photo
+        fallback = "▴" if expanded else "▾"
+        toggle_widget.icon_label.configure(image=icon, text=fallback if icon is None else "")
+        toggle_widget.image = icon
+
     def _layout_filter_row():
         row_width = max(140, left_top_card.winfo_width() - (search_box_inset * 2))
         row_height = filter_row_height
         row_y = search_box_inset + search_box_height + filter_row_top_gap
         filter_row.place(x=search_box_inset, y=row_y, width=row_width, height=row_height)
+
+    def _layout_filter_content():
+        content_x = search_box_inset
+        content_y = search_box_inset + search_box_height + filter_row_top_gap + filter_row_height + filter_content_top_gap
+        content_width = max(140, left_top_card.winfo_width() - (search_box_inset * 2))
+        max_visible_height = max(0, left_top_card.winfo_height() - content_y - filter_content_bottom_padding)
+        visible_height = min(filter_content_height, max_visible_height)
+
+        if visible_height <= 0:
+            filter_content_clip.place_forget()
+            return
+
+        filter_content_clip.place(x=content_x, y=content_y, width=content_width, height=visible_height)
+        filter_content_inner.place(x=0, y=0, width=content_width, height=filter_content_height)
+
+    def _toggle_doc_type_dropdown():
+        dropdown_state["doc_type_expanded"] = not dropdown_state["doc_type_expanded"]
+        if dropdown_state["doc_type_expanded"]:
+            doc_type_dropdown_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+            dropdown_state["file_type_expanded"] = False
+            file_type_dropdown_frame.grid_forget()
+        else:
+            doc_type_dropdown_frame.grid_forget()
+        _set_dropdown_icon(doc_type_field["toggle"], dropdown_state["doc_type_expanded"])
+        _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
+
+    def _toggle_file_type_dropdown():
+        dropdown_state["file_type_expanded"] = not dropdown_state["file_type_expanded"]
+        if dropdown_state["file_type_expanded"]:
+            file_type_dropdown_frame.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+            dropdown_state["doc_type_expanded"] = False
+            doc_type_dropdown_frame.grid_forget()
+        else:
+            file_type_dropdown_frame.grid_forget()
+        _set_dropdown_icon(doc_type_field["toggle"], dropdown_state["doc_type_expanded"])
+        _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
 
     def _refresh_layout_drawings():
         _draw_card(left_top_card, bottom_shrink=0)
@@ -278,6 +553,7 @@ def show_search_files_screen(app):
         _draw_card(right_card, bottom_shrink=12)
         _draw_search_box()
         _layout_filter_row()
+        _layout_filter_content()
 
     def _finish_filter_animation(expanded):
         filter_panel_state["expanded"] = expanded
@@ -324,8 +600,30 @@ def show_search_files_screen(app):
         filter_panel_state["anim_start_time"] = int(app.root.tk.call("clock", "milliseconds"))
         filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
 
-    search_icon_button = _create_icon_action(icon_row, search_icon_photo, "🔍", _start_search_placeholder)
-    clear_icon_button = _create_icon_action(icon_row, clear_icon_photo, "✕", _clear_search_text)
+    search_input = RoundedInput(
+        search_box_holder,
+        textvariable=search_var,
+        placeholder=search_placeholder_text,
+        width=260,
+        height=search_box_height,
+        corner_radius=12,
+        font=app._font(11),
+        foreground=SF_TEXT_DARK,
+        placeholder_color=SF_TEXT_PLACEHOLDER,
+        fill=colors.SURFACE_ALT,
+        border_color=SF_INPUT_IDLE_BORDER,
+        focus_fill=colors.SURFACE_ALT,
+        focus_border_color=SF_INPUT_FOCUS_BORDER,
+        disabled_fill=colors.SURFACE_ALT,
+        disabled_foreground=SF_TEXT_PLACEHOLDER,
+        leading_icon=search_icon_photo,
+        state="normal",
+    )
+    search_text_entry = search_input.entry
+    search_text_entry.configure(insertbackground=SF_TEXT_DARK)
+    search_text_entry.grid_configure(padx=(6, 30))
+
+    clear_icon_button = _create_icon_action(search_box_holder, clear_icon_photo, "✕", _clear_search_text)
     filter_toggle_icon = _create_icon_action(
         filter_row,
         expand_icon_photo,
@@ -334,18 +632,264 @@ def show_search_files_screen(app):
         icon_pad=(1, 1),
     )
 
-    clear_icon_button.pack(side="right")
-    search_icon_button.pack(side="right", padx=(0, icon_gap))
+    # Filter inputs: date range (2) + document type + file type + uploader.
+    date_col = filter_col_frames[0]
+    doc_type_col = filter_col_frames[1]
+    file_type_col = filter_col_frames[2]
+    uploader_col = filter_col_frames[3]
 
-    icon_row.pack(side="right", padx=(4, 8), pady=0)
-    search_text_entry.pack(side="left", fill="x", expand=True, padx=(14, 6), pady=(0, 1))
+    date_range_row = tk.Frame(date_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    date_range_row.grid(row=1, column=0, sticky="ew", padx=(2, 6))
+    date_range_row.grid_columnconfigure(0, weight=1)
+    date_range_row.grid_columnconfigure(1, weight=0)
+    date_range_row.grid_columnconfigure(2, weight=1)
+
+    date_from_field = _create_rounded_input(
+        date_range_row,
+        date_from_var,
+        placeholder="시작일",
+        trailing_icon_photo=calendar_icon_photo,
+        trailing_icon_command=lambda: None,
+    )
+    date_from_field["canvas"].grid(row=0, column=0, sticky="ew")
+    _align_rounded_placeholder(date_from_field, left_pad=6, right_pad=30)
+
+    to_label = tk.Label(
+        date_range_row,
+        image=to_icon_photo,
+        text="~" if to_icon_photo is None else "",
+        compound="center",
+        bg=colors.SURFACE_ALT,
+        fg=SF_TEXT_DARK,
+        font=app._font(9, "bold"),
+    )
+    to_label.grid(row=0, column=1, padx=(6, 6))
+    to_label.image = to_icon_photo
+
+    date_to_field = _create_rounded_input(
+        date_range_row,
+        date_to_var,
+        placeholder="종료일",
+        trailing_icon_photo=calendar_icon_photo,
+        trailing_icon_command=lambda: None,
+    )
+    date_to_field["canvas"].grid(row=0, column=2, sticky="ew")
+    _align_rounded_placeholder(date_to_field, left_pad=6, right_pad=30)
+
+    date_quick_row = tk.Frame(date_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    date_quick_row.grid(row=2, column=0, sticky="ew", padx=(2, 6), pady=(6, 0))
+    for quick_idx in range(5):
+        date_quick_row.grid_columnconfigure(quick_idx, weight=1, uniform="date_quick")
+
+    doc_type_field = _create_rounded_input(
+        doc_type_col,
+        doc_type_var,
+        placeholder="모든 문서 유형",
+        with_toggle_icon=True,
+        toggle_command=_toggle_doc_type_dropdown,
+    )
+    doc_type_field["canvas"].grid(row=1, column=0, sticky="ew", padx=(2, 6))
+    _align_rounded_placeholder(doc_type_field, left_pad=6, right_pad=30)
+
+    file_type_field = _create_rounded_input(
+        file_type_col,
+        file_type_var,
+        placeholder="모든 파일 종류",
+        with_toggle_icon=True,
+        toggle_command=_toggle_file_type_dropdown,
+    )
+    file_type_field["canvas"].grid(row=1, column=0, sticky="ew", padx=(2, 6))
+    _align_rounded_placeholder(file_type_field, left_pad=6, right_pad=30)
+
+    uploader_field = _create_rounded_input(
+        uploader_col,
+        uploader_var,
+        placeholder="이름을 입력하세요",
+    )
+    uploader_field["canvas"].grid(row=1, column=0, sticky="ew", padx=(2, 6))
+    _align_rounded_placeholder(uploader_field, left_pad=6, right_pad=8)
+
+    doc_type_dropdown_frame = tk.Frame(doc_type_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    doc_type_listbox = tk.Listbox(
+        doc_type_dropdown_frame,
+        height=6,
+        activestyle="none",
+        selectmode="browse",
+        bd=0,
+        highlightthickness=1,
+        highlightbackground=SF_SEARCH_BOX_BORDER,
+        relief="flat",
+        bg=colors.SURFACE_ALT,
+        fg=SF_TEXT_DARK,
+        font=app._font(10),
+        exportselection=False,
+    )
+    for option in doc_type_options:
+        doc_type_listbox.insert(tk.END, option)
+    doc_type_listbox.pack(fill="x")
+
+    file_type_dropdown_frame = tk.Frame(file_type_col, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    file_type_listbox = tk.Listbox(
+        file_type_dropdown_frame,
+        height=6,
+        activestyle="none",
+        selectmode="browse",
+        bd=0,
+        highlightthickness=1,
+        highlightbackground=SF_SEARCH_BOX_BORDER,
+        relief="flat",
+        bg=colors.SURFACE_ALT,
+        fg=SF_TEXT_DARK,
+        font=app._font(10),
+        exportselection=False,
+    )
+    for option in file_type_options:
+        file_type_listbox.insert(tk.END, option)
+    file_type_listbox.pack(fill="x")
+
+    def _on_pick_doc_type(_event=None):
+        selected = doc_type_listbox.curselection()
+        if not selected:
+            return
+        doc_type_var.set(doc_type_listbox.get(selected[0]))
+        if dropdown_state["doc_type_expanded"]:
+            _toggle_doc_type_dropdown()
+
+    def _on_pick_file_type(_event=None):
+        selected = file_type_listbox.curselection()
+        if not selected:
+            return
+        file_type_var.set(file_type_listbox.get(selected[0]))
+        if dropdown_state["file_type_expanded"]:
+            _toggle_file_type_dropdown()
+
+    doc_type_listbox.bind("<<ListboxSelect>>", _on_pick_doc_type)
+    file_type_listbox.bind("<<ListboxSelect>>", _on_pick_file_type)
+
+    def _bind_date_entry(entry_widget, value_var):
+        def on_focus_in(_event):
+            return None
+
+        def on_key_release(_event):
+            if str(value_var.get() or "").strip() == "-":
+                return
+            _digits, normalized_text = normalize_date_input(value_var.get())
+            value_var.set(normalized_text)
+            entry_widget.icursor(tk.END)
+
+        entry_widget.bind("<FocusIn>", on_focus_in, add="+")
+        entry_widget.bind("<KeyRelease>", on_key_release, add="+")
+
+    _bind_date_entry(date_from_field["entry"], date_from_var)
+    _bind_date_entry(date_to_field["entry"], date_to_var)
+
+    quick_date_state = {"active": None}
+    quick_date_buttons = {}
+
+    def _set_quick_button_state(active_key):
+        quick_date_state["active"] = active_key
+        for key, button in quick_date_buttons.items():
+            button["set_active"](key == active_key)
+
+    def _set_date_range_by_quick_key(key):
+        today = date.today()
+        if key == "today":
+            iso_today = today.isoformat()
+            date_from_var.set(iso_today)
+            date_to_var.set(iso_today)
+        elif key == "7d":
+            date_to_var.set(today.isoformat())
+            date_from_var.set((today - timedelta(days=6)).isoformat())
+        elif key == "30d":
+            date_to_var.set(today.isoformat())
+            date_from_var.set((today - timedelta(days=29)).isoformat())
+        elif key == "1y":
+            date_to_var.set(today.isoformat())
+            date_from_var.set((today - timedelta(days=365)).isoformat())
+        elif key == "all":
+            date_from_var.set("-")
+            date_to_var.set("-")
+        _set_quick_button_state(key)
+
+    def _create_quick_button(parent, text, key):
+        canvas = tk.Canvas(
+            parent,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+            height=24,
+            cursor="hand2",
+        )
+        state = {"active": False}
+
+        def _redraw(_event=None):
+            canvas.delete("all")
+            width = max(20, canvas.winfo_width())
+            height = max(20, canvas.winfo_height())
+            is_active = state["active"]
+            fill_color = SF_PRIMARY if is_active else colors.SURFACE_ALT
+            border_color = SF_PRIMARY if is_active else SF_INPUT_IDLE_BORDER
+            text_color = colors.TEXT_INVERSE if is_active else SF_TEXT_DARK
+
+            _draw_plain_rounded_rect(
+                canvas,
+                1,
+                1,
+                width - 1,
+                height - 1,
+                8,
+                fill=fill_color,
+                outline=border_color,
+                border_width=1,
+            )
+            canvas.create_text(
+                width / 2.0,
+                height / 2.0,
+                text=text,
+                fill=text_color,
+                font=app._font(9, "bold"),
+                anchor="center",
+                tags=("quick_btn",),
+            )
+            canvas.create_rectangle(0, 0, width, height, fill="", outline="", tags=("quick_btn",))
+
+        def _apply_quick(_event=None):
+            _set_date_range_by_quick_key(key)
+
+        def _set_active(enabled):
+            state["active"] = bool(enabled)
+            _redraw()
+
+        canvas.bind("<Configure>", _redraw, add="+")
+        canvas.bind("<Button-1>", _apply_quick, add="+")
+        canvas.tag_bind("quick_btn", "<Button-1>", _apply_quick)
+        _redraw()
+        return {
+            "canvas": canvas,
+            "set_active": _set_active,
+        }
+
+    for idx, (label_text, key) in enumerate([
+        ("오늘", "today"),
+        ("7일", "7d"),
+        ("30일", "30d"),
+        ("1년", "1y"),
+        ("전체", "all"),
+    ]):
+        btn = _create_quick_button(date_quick_row, label_text, key)
+        btn["canvas"].grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 4, 0))
+        quick_date_buttons[key] = btn
+
+    _set_dropdown_icon(doc_type_field["toggle"], False)
+    _set_dropdown_icon(file_type_field["toggle"], False)
+
+    search_input.pack(fill="both", expand=True)
+    clear_icon_button.place(relx=1.0, rely=0.5, x=-6, y=0, anchor="e")
+
     filter_label.pack(side="left", padx=(2, 0))
     filter_toggle_icon.pack(side="left", padx=(1, 0))
 
-    search_text_entry.bind("<FocusIn>", _on_entry_focus_in, add="+")
-    search_text_entry.bind("<FocusOut>", _on_entry_focus_out, add="+")
     app.root.bind("<Button-1>", _on_click_outside_search_box, add="+")
-    _set_placeholder_text()
 
     def _draw_card(card_canvas, bottom_shrink=12):
         card_canvas.delete("all")
@@ -366,25 +910,12 @@ def show_search_files_screen(app):
 
     def _draw_search_box():
         bar_width = max(220, left_top_card.winfo_width() - (search_box_inset * 2))
-        search_box_canvas.place(
+        search_box_holder.place(
             x=search_box_inset,
             y=search_box_inset,
             width=bar_width,
             height=search_box_height,
         )
-        search_box_canvas.delete("all")
-        app._smooth_rounded_rect(
-            search_box_canvas,
-            1,
-            1,
-            bar_width - 1,
-            search_box_height - 1,
-            16,
-            fill=colors.SURFACE_ALT,
-            outline=SF_SEARCH_BOX_BORDER,
-            width=1,
-        )
-        search_box_canvas.tag_lower("all")
 
     def _on_layout_change(_event=None):
         if not _has_valid_left_layout_space():

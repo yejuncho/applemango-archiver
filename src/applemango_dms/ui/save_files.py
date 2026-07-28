@@ -1713,40 +1713,13 @@ def show_save_files_screen(app):
         date_field_y2 = date_field_y1 + field_height
         right_card.date_field_bounds = (date_field_x1, date_field_y1, date_field_x2, date_field_y2)
 
-        app._smooth_rounded_rect(
-            right_card,
-            date_field_x1,
-            date_field_y1,
-            date_field_x2,
-            date_field_y2,
-            field_radius,
-            fill=SF_SURFACE,
-            outline=SF_BORDER_INPUT,
-            width=1,
-        )
-
-        field_click_area_id = right_card.create_rectangle(
-            date_field_x1,
-            date_field_y1,
-            date_field_x2,
-            date_field_y2,
-            fill="",
-            outline="",
-            tags=("batch_date_field_click",),
-        )
-
-        batch_date_var = tk.StringVar(value=get_batch_date_default_text())
+        batch_date_default_text = get_batch_date_default_text()
+        batch_date_var = tk.StringVar(value=batch_date_default_text)
         batch_date_entry = tk.Entry(
             right_card,
             textvariable=batch_date_var,
             font=app._font(12),
-            justify="left",
-            bd=0,
-            relief="flat",
-            highlightthickness=0,
-            bg=SF_SURFACE,
-            fg=SF_TEXT_MAIN,
-            insertbackground=SF_TEXT_MAIN,
+            justify="center",
         )
 
         def on_batch_date_focus_in(_event, var=batch_date_var):
@@ -1754,11 +1727,15 @@ def show_save_files_screen(app):
                 var.set("")
 
         def on_batch_date_key_release(_event, var=batch_date_var, entry_widget=batch_date_entry):
+            if var.get() in {"YYYY-MM-DD", "yyyy-mm-dd"}:
+                return
             _digits, normalized_text = normalize_date_input(var.get())
             var.set(normalized_text)
             entry_widget.icursor(tk.END)
 
         def commit_batch_date_changes(_event=None):
+            if not (batch_date_var.get() or "").strip():
+                batch_date_var.set("YYYY-MM-DD")
             return None
 
         def focus_batch_date_entry(_event=None, entry_widget=batch_date_entry):
@@ -1773,22 +1750,19 @@ def show_save_files_screen(app):
             right_card.focus_set()
             return "break"
 
-        batch_date_entry.bind("<FocusIn>", on_batch_date_focus_in)
+        batch_date_entry.bind("<FocusIn>", on_batch_date_focus_in, add="+")
         batch_date_entry.bind("<KeyRelease>", on_batch_date_key_release)
         batch_date_entry.bind("<FocusOut>", commit_batch_date_changes)
         batch_date_entry.bind("<Return>", on_batch_date_return)
         batch_date_entry.bind("<Button-1>", focus_batch_date_entry, add="+")
-        right_card.tag_bind("batch_date_field_click", "<Button-1>", focus_batch_date_entry)
         right_card.create_window(
-            date_field_x1 + 10,
+            date_field_x1 + (date_field_width / 2.0),
             (date_field_y1 + date_field_y2) / 2.0,
             window=batch_date_entry,
-            width=max(60, date_field_width - 20),
-            height=max(20, field_height - 8),
-            anchor="w",
+            width=max(60, date_field_width),
+            height=22,
+            anchor="center",
         )
-        right_card.tag_raise("batch_date_field_click")
-        right_card.tag_raise(field_click_area_id)
 
         # Keep this as the regular gap between sections.
         doc_label_y = date_field_y2 + section_gap
@@ -1810,66 +1784,50 @@ def show_save_files_screen(app):
         doc_field_y2 = doc_field_y1 + field_height
         right_card.doc_field_bounds = (doc_field_x1, doc_field_y1, doc_field_x2, doc_field_y2)
 
-        app._smooth_rounded_rect(
+        doc_type_default_text = get_batch_document_type_default_text()
+        doc_type_var = tk.StringVar(value=doc_type_default_text)
+        doc_type_entry = tk.Entry(
             right_card,
-            doc_field_x1,
-            doc_field_y1,
-            doc_field_x2,
-            doc_field_y2,
-            field_radius,
-            fill=SF_SURFACE,
-            outline=SF_BORDER_INPUT,
-            width=1,
-        )
-
-        doc_type_var = tk.StringVar(value=get_batch_document_type_default_text())
-
-        doc_text_id = right_card.create_text(
-            doc_field_x1 + 10,
-            (doc_field_y1 + doc_field_y2) / 2.0,
-            text=doc_type_var.get(),
-            fill=SF_TEXT_PLACEHOLDER if doc_type_var.get() == "---" else SF_TEXT_MAIN,
+            textvariable=doc_type_var,
             font=app._font(12),
-            anchor="w",
-            tags=("batch_doc_type_field_click",),
+            justify="center",
         )
+        # Keep doc type field selection-driven, not free-form typing.
+        doc_type_entry.bind("<KeyPress>", lambda _event: "break", add="+")
 
         expand_icon_x = doc_field_x2 - 12
         expand_icon_y = (doc_field_y1 + doc_field_y2) / 2.0
         if right_expand_icon is not None:
-            right_card.create_image(
+            right_doc_expand_icon_id = right_card.create_image(
                 expand_icon_x,
                 expand_icon_y,
                 image=right_expand_icon,
                 anchor="center",
-                tags=("batch_doc_type_field_click",),
+                tags=("batch_doc_type_expand_click",),
             )
         else:
-            right_card.create_text(
+            right_doc_expand_icon_id = right_card.create_text(
                 expand_icon_x,
                 expand_icon_y,
                 text="▾",
                 fill=SF_TEXT_MAIN,
                 font=app._font(11, "bold"),
                 anchor="center",
-                tags=("batch_doc_type_field_click",),
+                tags=("batch_doc_type_expand_click",),
             )
 
-        right_card.create_rectangle(
-            doc_field_x1,
-            doc_field_y1,
-            doc_field_x2,
-            doc_field_y2,
-            fill="",
-            outline="",
-            tags=("batch_doc_type_field_click",),
+        right_card.create_window(
+            doc_field_x1 + (doc_field_width / 2.0),
+            (doc_field_y1 + doc_field_y2) / 2.0,
+            window=doc_type_entry,
+            width=max(60, doc_field_width),
+            height=22,
+            anchor="center",
         )
 
         def update_doc_type_display():
             value = (doc_type_var.get() or "---").strip() or "---"
             doc_type_var.set(value)
-            right_card.itemconfigure(doc_text_id, text=value)
-            right_card.itemconfigure(doc_text_id, fill=SF_TEXT_PLACEHOLDER if value == "---" else SF_TEXT_MAIN)
 
         def close_doc_type_popup():
             popup = getattr(right_card, "doc_type_popup_ref", None)
@@ -1949,6 +1907,13 @@ def show_save_files_screen(app):
             right_card.doc_type_popup_ref = popup
             return "break"
 
+        def on_doc_type_field_click(_event=None):
+            return open_doc_type_popup()
+
+        for widget in (doc_type_entry,):
+            widget.bind("<Button-1>", on_doc_type_field_click, add="+")
+        right_card.tag_bind("batch_doc_type_expand_click", "<Button-1>", open_doc_type_popup)
+
         def on_right_card_click(event):
             click_x = event.x
             click_y = event.y
@@ -1989,40 +1954,12 @@ def show_save_files_screen(app):
         tag_field_y2 = tag_field_y1 + field_height
         right_card.tag_field_bounds = (tag_field_x1, tag_field_y1, tag_field_x2, tag_field_y2)
 
-        app._smooth_rounded_rect(
-            right_card,
-            tag_field_x1,
-            tag_field_y1,
-            tag_field_x2,
-            tag_field_y2,
-            field_radius,
-            fill=SF_SURFACE,
-            outline=SF_BORDER_INPUT,
-            width=1,
-        )
-
-        right_card.create_rectangle(
-            tag_field_x1,
-            tag_field_y1,
-            tag_field_x2,
-            tag_field_y2,
-            fill="",
-            outline="",
-            tags=("batch_tag_field_click",),
-        )
-
         batch_tag_var = tk.StringVar(value=get_batch_tags_default_text())
         batch_tag_entry = tk.Entry(
             right_card,
             textvariable=batch_tag_var,
             font=app._font(12),
             justify="left",
-            bd=0,
-            relief="flat",
-            highlightthickness=0,
-            bg=SF_SURFACE,
-            fg=SF_TEXT_MAIN,
-            insertbackground=SF_TEXT_MAIN,
         )
 
         def on_batch_tag_key_release(_event, var=batch_tag_var, entry_widget=batch_tag_entry):
@@ -2047,14 +1984,13 @@ def show_save_files_screen(app):
         batch_tag_entry.bind("<FocusOut>", commit_batch_tag_changes)
         batch_tag_entry.bind("<Return>", on_batch_tag_return)
         batch_tag_entry.bind("<Button-1>", focus_batch_tag_entry, add="+")
-        right_card.tag_bind("batch_tag_field_click", "<Button-1>", focus_batch_tag_entry)
         right_card.create_window(
-            tag_field_x1 + 10,
+            tag_field_x1 + (tag_field_width / 2.0),
             (tag_field_y1 + tag_field_y2) / 2.0,
             window=batch_tag_entry,
-            width=max(60, tag_field_width - 20),
-            height=max(20, field_height - 8),
-            anchor="w",
+            width=max(60, tag_field_width),
+            height=22,
+            anchor="center",
         )
 
         def apply_selected_batch_settings():

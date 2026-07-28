@@ -19,6 +19,7 @@ from applemango_dms.services.nas import (
 )
 
 from applemango_dms.ui import colors
+from applemango_dms.ui.widgets import RoundedInput
 
 LOGIN_BG = colors.BACKGROUND
 LOGIN_PANEL_BG = colors.SURFACE
@@ -141,47 +142,38 @@ def toggle_password_visibility(app, entry_widget, field_state, eye_widget=None):
 
 def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
     wrapper = tk.Frame(parent, bg=LOGIN_FIELD_WRAPPER_BG)
-    canvas = tk.Canvas(wrapper, height=52, bg=LOGIN_FIELD_WRAPPER_BG, highlightthickness=0, bd=0)
-    canvas.pack(fill="x")
-
-    inner = tk.Frame(canvas, bg=LOGIN_FIELD_BG)
-    inner_id = canvas.create_window(10, 5, window=inner, anchor="nw", height=42)
-
     leading_icon = app.login_icon_photos.get(icon_key)
-    icon_label = tk.Label(inner, bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY)
-    if leading_icon is not None:
-        icon_label.configure(image=leading_icon)
-        icon_label.image = leading_icon
-    else:
-        fallback_text = "👤" if icon_key == "username" else "🔒"
-        icon_label.configure(text=fallback_text, font=("Segoe UI Emoji", 11))
-    icon_label.pack(side="left", padx=(12, 9))
 
     value_var = tk.StringVar(value="")
-    entry = tk.Entry(
-        inner,
+    rounded_input = RoundedInput(
+        wrapper,
         textvariable=value_var,
-        show="*" if is_password else "",
+        placeholder=placeholder,
+        leading_icon=leading_icon,
+        show_clear_button=False,
+        height=52,
+        corner_radius=16,
         font=app._font(12),
-        bd=0,
-        relief="flat",
-        highlightthickness=0,
-        bg=LOGIN_FIELD_BG,
-        fg=LOGIN_TEXT_PRIMARY,
+        fill=LOGIN_FIELD_BG,
+        border_color=LOGIN_BORDER,
+        focus_fill=LOGIN_FIELD_BG,
+        focus_border_color=LOGIN_FOCUS_BORDER,
+        foreground=LOGIN_TEXT_PRIMARY,
+        placeholder_color=LOGIN_TEXT_SECONDARY,
+        show="*" if is_password else "",
+        on_submit=None,
+        on_change=None,
+    )
+    rounded_input.pack(fill="x")
+
+    entry = rounded_input.entry
+    entry.configure(
+        show="*" if is_password else "",
         insertbackground=LOGIN_INSERT_COLOR,
         insertontime=600,
         insertofftime=400,
         insertwidth=2,
     )
-    entry.pack(side="left", fill="both", expand=True, pady=8)
-
-    canvas.bind("<Button-1>", lambda _e: entry.focus_set())
-    inner.bind("<Button-1>", lambda _e: entry.focus_set())
-    icon_label.bind("<Button-1>", lambda _e: entry.focus_set())
-
-    placeholder_label = tk.Label(inner, text=placeholder, font=app._font(11), bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY)
-    placeholder_label.place(x=42, y=9)
-    placeholder_label.bind("<Button-1>", lambda _e: entry.focus_set())
 
     field_state = {
         "focused": False,
@@ -191,47 +183,14 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
     eye_label = None
     if is_password:
         eye_icon = app.login_icon_photos.get("password_visible")
-        eye_label = tk.Label(inner, bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY, cursor="hand2")
+        eye_label = tk.Label(wrapper, bg=LOGIN_FIELD_BG, fg=LOGIN_TEXT_SECONDARY, cursor="hand2")
         if eye_icon is not None:
             eye_label.configure(image=eye_icon)
             eye_label.image = eye_icon
         else:
             eye_label.configure(text="\U0001f441", font=("Segoe UI Emoji", 13))
-        eye_label.pack(side="right", padx=(6, 12))
+        eye_label.place(relx=1.0, x=-16, rely=0.5, y=0, anchor="e", width=24, height=24)
         eye_label.bind("<Button-1>", lambda _e: toggle_password_visibility(app, entry, field_state, eye_label))
-
-    def redraw_field(border_color):
-        canvas.delete("field")
-        w = max(40, canvas.winfo_width())
-        h = max(40, canvas.winfo_height())
-        app._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill=LOGIN_FIELD_BG, outline="", width=0, tags="field")
-        app._smooth_rounded_rect(canvas, 1, 1, w - 1, h - 1, 16, fill="", outline=border_color, width=1, tags="field")
-        canvas.tag_lower("field")
-        canvas.itemconfigure(inner_id, width=max(10, w - 20))
-
-    def update_placeholder(*_args):
-        if value_var.get() or field_state["focused"]:
-            placeholder_label.place_forget()
-        else:
-            placeholder_label.place(x=42, y=9)
-
-    def on_focus_in(_event):
-        field_state["focused"] = True
-        redraw_field(LOGIN_FOCUS_BORDER)
-        placeholder_label.place_forget()
-
-    def on_focus_out(_event):
-        field_state["focused"] = False
-        redraw_field(LOGIN_BORDER)
-        update_placeholder()
-
-    canvas.bind("<Configure>", lambda _e: redraw_field(LOGIN_FOCUS_BORDER if field_state["focused"] else LOGIN_BORDER))
-    entry.bind("<FocusIn>", on_focus_in)
-    entry.bind("<FocusOut>", on_focus_out)
-    value_var.trace_add("write", update_placeholder)
-
-    redraw_field(LOGIN_BORDER)
-    update_placeholder()
 
     return {
         "wrapper": wrapper,
@@ -239,7 +198,7 @@ def create_rounded_entry(app, parent, placeholder, icon_key, is_password=False):
         "var": value_var,
         "get_value": lambda: value_var.get().strip(),
         "set_value": lambda value: value_var.set(value),
-        "focus": lambda: entry.focus_set(),
+        "focus": lambda: rounded_input.focus_input(),
         "eye": eye_label,
     }
 
