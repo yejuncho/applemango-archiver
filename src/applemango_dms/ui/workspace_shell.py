@@ -68,24 +68,10 @@ def create_workspace_shell(app):
     sidebar_window_id = sidebar_shell.create_window(0, 0, window=sidebar, anchor="nw")
 
     def redraw_sidebar(_event=None):
-        sidebar_shell.delete("sidepanel")
         width = max(170, sidebar_shell.winfo_width())
         height = max(220, sidebar_shell.winfo_height())
-        app._smooth_rounded_rect(
-            sidebar_shell,
-            1,
-            1,
-            width - 1,
-            height - 1,
-            24,
-            fill="#ffffff",
-            outline="#dfe5ee",
-            width=1,
-            tags="sidepanel",
-        )
-        sidebar_shell.coords(sidebar_window_id, 6, 6)
-        sidebar_shell.itemconfigure(sidebar_window_id, width=max(10, width - 12), height=max(10, height - 12))
-        sidebar_shell.tag_lower("sidepanel")
+        sidebar_shell.coords(sidebar_window_id, 0, 0)
+        sidebar_shell.itemconfigure(sidebar_window_id, width=max(10, width), height=max(10, height))
 
     sidebar_shell.bind("<Configure>", redraw_sidebar)
 

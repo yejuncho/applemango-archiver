@@ -16,7 +16,7 @@ import applemango_dms.config as config
 import applemango_dms.state as state
 from applemango_dms.services.nas import get_mapped_network_drives, normalize_drive_letter
 from applemango_dms.ui import colors
-from applemango_dms.ui.workplace_menu import build_sidebar_nav
+from applemango_dms.ui.workplace_menu import render_workspace_sidebar_nav
 from applemango_dms.ui.widgets import RoundedInput
 from applemango_dms.utils.images import load_logo_photo, load_svg_photo
 
@@ -32,6 +32,7 @@ except ImportError:
 
 SF_SURFACE = colors.SURFACE_ALT
 SF_SURFACE_ALT = colors.SURFACE_ACCENT_SOFT
+SF_ACCENT = colors.ACCENT
 SF_SURFACE_HOVER = colors.SURFACE_HOVER
 SF_SURFACE_HOVER_SOFT = colors.SURFACE_HOVER_SOFT
 SF_SURFACE_DANGER_HOVER = colors.SURFACE_DANGER_HOVER
@@ -64,24 +65,10 @@ def show_save_files_screen(app):
     shell = app._create_workspace_shell()
     app.root.title("애플망고 DMS - 파일 저장")
 
-    build_sidebar_nav(
-        app,
-        shell["sidebar"],
-        "save",
-        [
-            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, SF_STATUS_PROCESSING),
-            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, SF_TEXT_DARK),
-            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, SF_STATUS_FAILED),
-        ],
-        icon_photos={
-            "save": app.ui_icon_photos.get("workspace_file_save"),
-            "search": app.ui_icon_photos.get("workspace_file_search"),
-            "exit": app.ui_icon_photos.get("workspace_exit"),
-        },
-    )
+    render_workspace_sidebar_nav(app, shell["sidebar"], "save")
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 저장", "아래 버튼을 클릭하여 파일 또는 폴더를 선택하세요.")
+    app._build_workspace_page_header(outer, "파일 저장", "파일을 체계적으로 분류하고 안전하게 보관할 수 있어요.")
 
     board = tk.Frame(outer, bg=SF_SURFACE, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)
@@ -539,13 +526,21 @@ def show_save_files_screen(app):
 
     detail_card.delete("all")
     full_detail_height = max(100, left_col.winfo_height(), detail_card.winfo_height())
-    detail_bottom_shrink = 4
+    detail_bottom_shrink = 10
     detail_height = max(100, full_detail_height - detail_bottom_shrink)
+
+    # Horizontal insets for the full detail card body.
+    # Increase detail_left_inset to grow the gap from the sidebar side.
+    detail_left_inset = 10
+    detail_right_inset = 4
+    detail_x1 = 1 + detail_left_inset
+    detail_x2 = max(detail_x1 + 40, detail_width - 1 - detail_right_inset)
+
     app._smooth_rounded_rect(
         detail_card,
+        detail_x1,
         1,
-        1,
-        detail_width - 1,
+        detail_x2,
         detail_height - 1,
         24,
         fill=SF_SURFACE,
@@ -555,12 +550,12 @@ def show_save_files_screen(app):
 
     # Keep requested row proportions while fitting fully inside the card.
     row_weights = [10, 7.5, 80, 7.5]
-    row_colors = [SF_SURFACE, SF_SURFACE_ALT, SF_SURFACE, SF_SURFACE_ALT]
+    row_colors = [SF_SURFACE, SF_ACCENT, SF_SURFACE, SF_ACCENT]
     total_weight = float(sum(row_weights))
     # Keep row backgrounds away from corner arcs so the rounded card edge stays visible.
     inner_padding = 8
-    inner_x1, inner_y1 = inner_padding, inner_padding
-    inner_x2, inner_y2 = detail_width - inner_padding, detail_height - inner_padding
+    inner_x1, inner_y1 = detail_x1 + inner_padding, inner_padding
+    inner_x2, inner_y2 = detail_x2 - inner_padding, detail_height - inner_padding
     inner_height = max(1, inner_y2 - inner_y1)
 
     row_heights = [int(inner_height * (w / total_weight)) for w in row_weights]
@@ -916,9 +911,12 @@ def show_save_files_screen(app):
 
     update_action_buttons_visibility()
 
-    # Row-2 / Row-3 shared column widths (percent). Last delete column removed; progress column absorbs its width.
-    table_col_widths_pct = [2.5, 32.5, 14.5, 12.0, 13.5, 7.5, 7.5, 10.0]
+    # Row-2 / Row-3 shared column widths (percent).
+    # Added an icon-only column between checkbox and filename;
+    # width is taken only from the document-type column.
+    table_col_widths_pct = [2.5, 2.5, 32, 14.5, 10, 13.5, 7.5, 7.5, 10.0]
     row2_headers = [
+        "",
         "",
         "원본 파일명",
         "날짜",
@@ -980,22 +978,22 @@ def show_save_files_screen(app):
 
     file_icon_dir = config.PROJECT_ROOT / "assets" / "icons" / "file_formats"
     file_format_icons = {
-        "word": load_logo_photo(file_icon_dir / "icons8-word-48.png", max_width=16, max_height=16),
-        "txt": load_logo_photo(file_icon_dir / "icons8-txt-48.png", max_width=16, max_height=16),
-        "pdf": load_logo_photo(file_icon_dir / "icons8-pdf-40.png", max_width=16, max_height=16),
-        "excel": load_logo_photo(file_icon_dir / "icons8-excel-48.png", max_width=16, max_height=16),
-        "csv": load_logo_photo(file_icon_dir / "icons8-csv-48.png", max_width=16, max_height=16),
-        "powerpoint": load_logo_photo(file_icon_dir / "icons8-powerpoint-48.png", max_width=16, max_height=16),
-        "image": load_logo_photo(file_icon_dir / "icons8-image-file-48.png", max_width=16, max_height=16),
-        "folder": load_logo_photo(file_icon_dir / "icons8-folder-48.png", max_width=16, max_height=16),
-        "archive_folder": load_logo_photo(file_icon_dir / "icons8-archive-folder-48.png", max_width=16, max_height=16),
-        "video": load_logo_photo(file_icon_dir / "icons8-video-48.png", max_width=16, max_height=16),
-        "audio": load_logo_photo(file_icon_dir / "icons8-audio-48.png", max_width=16, max_height=16),
-        "exe": load_logo_photo(file_icon_dir / "icons8-exe-48.png", max_width=16, max_height=16),
-        "design": load_logo_photo(file_icon_dir / "icons8-design-48.png", max_width=16, max_height=16),
-        "db": load_logo_photo(file_icon_dir / "icons8-db-48.png", max_width=16, max_height=16),
-        "html": load_logo_photo(file_icon_dir / "icons8-html-48.png", max_width=16, max_height=16),
-        "file": load_logo_photo(file_icon_dir / "icons8-file-48.png", max_width=16, max_height=16),
+        "word": load_logo_photo(file_icon_dir / "icons8-word-48.png", max_width=18, max_height=18),
+        "txt": load_logo_photo(file_icon_dir / "icons8-txt-48.png", max_width=18, max_height=18),
+        "pdf": load_logo_photo(file_icon_dir / "icons8-pdf-48.png", max_width=18, max_height=18),
+        "excel": load_logo_photo(file_icon_dir / "icons8-excel-48.png", max_width=18, max_height=18),
+        "csv": load_logo_photo(file_icon_dir / "icons8-csv-48.png", max_width=18, max_height=18),
+        "powerpoint": load_logo_photo(file_icon_dir / "icons8-powerpoint-48.png", max_width=18, max_height=18),
+        "image": load_logo_photo(file_icon_dir / "icons8-image-file-48.png", max_width=18, max_height=18),
+        "folder": load_logo_photo(file_icon_dir / "icons8-folder-48.png", max_width=18, max_height=18),
+        "archive_folder": load_logo_photo(file_icon_dir / "icons8-archive-folder-48.png", max_width=18, max_height=18),
+        "video": load_logo_photo(file_icon_dir / "icons8-video-48.png", max_width=18, max_height=18),
+        "audio": load_logo_photo(file_icon_dir / "icons8-audio-48.png", max_width=18, max_height=18),
+        "exe": load_logo_photo(file_icon_dir / "icons8-exe-48.png", max_width=18, max_height=18),
+        "design": load_logo_photo(file_icon_dir / "icons8-design-48.png", max_width=18, max_height=18),
+        "db": load_logo_photo(file_icon_dir / "icons8-db-48.png", max_width=18, max_height=18),
+        "html": load_logo_photo(file_icon_dir / "icons8-html-48.png", max_width=18, max_height=18),
+        "file": load_logo_photo(file_icon_dir / "icons8-file-48.png", max_width=18, max_height=18),
     }
     detail_card.file_format_icons_ref = file_format_icons
 
@@ -2457,10 +2455,10 @@ def show_save_files_screen(app):
 
         for row_values in rows:
             row_selected = bool(row_values["checked"])
-            row_bg_color = SF_PRIMARY if row_selected else row_colors[2]
-            row_primary_text_color = SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN
-            row_name_text_color = SF_TEXT_INVERSE if row_selected else SF_TEXT_DARK
-            row_separator_color = SF_ROW_SELECTED_SEPARATOR if row_selected else SF_BORDER
+            row_bg_color = row_colors[2]
+            row_primary_text_color = SF_TEXT_MAIN
+            row_name_text_color = SF_TEXT_DARK
+            row_separator_color = SF_BORDER
 
             row_canvas = tk.Canvas(
                 row3_body,
@@ -2483,19 +2481,19 @@ def show_save_files_screen(app):
             row_canvas.create_line(0, table_row_height - 1, row2_inner_width, table_row_height - 1, fill=row_separator_color, width=1)
 
             row_key = row_values["row_key"]
-            date_col_left = col_starts[2] - row2_inner_x1
-            date_col_width = col_width_px[2]
-            doc_col_left = col_starts[3] - row2_inner_x1
-            doc_col_width = col_width_px[3]
-            tags_col_left = col_starts[4] - row2_inner_x1
-            tags_col_width = col_width_px[4]
+            date_col_left = col_starts[3] - row2_inner_x1
+            date_col_width = col_width_px[3]
+            doc_col_left = col_starts[4] - row2_inner_x1
+            doc_col_width = col_width_px[4]
+            tags_col_left = col_starts[5] - row2_inner_x1
+            tags_col_width = col_width_px[5]
             row_canvas._save_files_editable_bounds = (
                 (date_col_left, date_col_left + date_col_width),
                 (doc_col_left, doc_col_left + doc_col_width),
                 (tags_col_left, tags_col_left + tags_col_width),
             )
 
-            check_icon = (checked_white_icon or checked_icon) if row_values["checked"] else unchecked_icon
+            check_icon = checked_icon if row_values["checked"] else unchecked_icon
             if check_icon is not None:
                 row_canvas.create_image(local_col_centers[0], table_row_height // 2, image=check_icon, anchor="center", tags=("row_item_toggle",))
             else:
@@ -2522,14 +2520,16 @@ def show_save_files_screen(app):
             )
             row_canvas.tag_bind("row_item_toggle", "<Button-1>", lambda event, key=row_key: toggle_row_item_checkbox(key, event))
 
-            col2_left_local = col_starts[1] - row2_inner_x1
+            icon_col_left_local = col_starts[1] - row2_inner_x1
+            icon_col_width = col_width_px[1]
             icon_photo = file_format_icons.get(row_values["icon_key"]) or file_format_icons.get("file")
-            text_start_x = col2_left_local + 8
             if icon_photo is not None:
-                row_canvas.create_image(col2_left_local + 10, table_row_height // 2, image=icon_photo, anchor="w")
-                text_start_x = col2_left_local + 27
-            col2_right_local = col2_left_local + col_width_px[1]
-            col2_text_max_width = max(0, int(col2_right_local - text_start_x - 6))
+                row_canvas.create_image(icon_col_left_local + (icon_col_width / 2.0), table_row_height // 2, image=icon_photo, anchor="center")
+
+            name_col_left_local = col_starts[2] - row2_inner_x1
+            name_col_right_local = name_col_left_local + col_width_px[2]
+            text_start_x = name_col_left_local + 8
+            col2_text_max_width = max(0, int(name_col_right_local - text_start_x - 6))
             row_name_font = app._font(11)
             col2_text_value = truncate_to_pixel_width(
                 row_values["original_name"],
@@ -2579,13 +2579,13 @@ def show_save_files_screen(app):
                 height=28,
                 corner_radius=8,
                 font=app._font(11),
-                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                foreground=SF_TEXT_MAIN,
                 placeholder_color=SF_TEXT_PLACEHOLDER,
                 background=row_bg_color,
                 fill=row_bg_color,
                 border_color=SF_BORDER_INPUT,
                 focus_fill=row_bg_color,
-                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                focus_border_color=SF_PRIMARY,
                 disabled_fill=row_bg_color,
                 disabled_foreground=SF_TEXT_MUTED,
                 state="normal",
@@ -2593,14 +2593,14 @@ def show_save_files_screen(app):
             date_entry = date_input.entry
             date_entry.configure(
                 justify="center",
-                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
-                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                fg=SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_MAIN,
             )
             date_entry.grid_configure(padx=(6, 30))
             date_input.set(date_display_value)
             date_input._refresh_visual_state(redraw=True)
 
-            date_calendar_icon = row_calendar_icon_light if row_selected else row_calendar_icon_dark
+            date_calendar_icon = row_calendar_icon_dark
             if date_calendar_icon is not None:
                 date_calendar_label = tk.Label(
                     date_input,
@@ -2655,13 +2655,13 @@ def show_save_files_screen(app):
                 height=28,
                 corner_radius=8,
                 font=app._font(10),
-                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                foreground=SF_TEXT_MAIN,
                 placeholder_color=SF_TEXT_PLACEHOLDER,
                 background=row_bg_color,
                 fill=row_bg_color,
                 border_color=SF_BORDER_INPUT,
                 focus_fill=row_bg_color,
-                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                focus_border_color=SF_PRIMARY,
                 disabled_fill=row_bg_color,
                 disabled_foreground=SF_TEXT_MUTED,
                 state="normal",
@@ -2669,14 +2669,14 @@ def show_save_files_screen(app):
             doc_type_entry = doc_type_input.entry
             doc_type_entry.configure(
                 justify="center",
-                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
-                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                fg=SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_MAIN,
             )
             doc_type_entry.grid_configure(padx=(6, 30))
             doc_type_input.set(doc_type_display_value)
             doc_type_input._refresh_visual_state(redraw=True)
 
-            row_doc_expand_icon = row_expand_icon_light if row_selected else row_expand_icon_dark
+            row_doc_expand_icon = row_expand_icon_dark
             if row_doc_expand_icon is not None:
                 doc_expand_label = tk.Label(
                     doc_type_input,
@@ -2693,7 +2693,7 @@ def show_save_files_screen(app):
                     doc_type_input,
                     text="▾",
                     bg=row_bg_color,
-                    fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                    fg=SF_TEXT_MAIN,
                     bd=0,
                     highlightthickness=0,
                     cursor="hand2",
@@ -2701,7 +2701,7 @@ def show_save_files_screen(app):
                 )
                 doc_expand_label.place(relx=1.0, rely=0.5, x=-10, y=0, anchor="e")
 
-            set_row_doc_expand_icon(doc_expand_label, row_selected, False)
+            set_row_doc_expand_icon(doc_expand_label, False, False)
 
             def on_doc_type_change(*_args, row_key=row_key, var=doc_type_var):
                 row_metadata_state.setdefault(row_key, {})["document_type"] = var.get().strip() or "기타"
@@ -2709,11 +2709,11 @@ def show_save_files_screen(app):
             doc_type_var.trace_add("write", on_doc_type_change)
             doc_type_entry.bind("<KeyPress>", lambda _event: "break", add="+")
 
-            def on_doc_type_open(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=row_selected):
+            def on_doc_type_open(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=False):
                 app.root.after_idle(lambda: open_row_doc_type_popup(field, key, var, icon, selected))
                 return "break"
 
-            def on_doc_expand_click(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=row_selected):
+            def on_doc_expand_click(_event=None, field=doc_type_input, key=row_key, var=doc_type_var, icon=doc_expand_label, selected=False):
                 app.root.after_idle(lambda: open_row_doc_type_popup(field, key, var, icon, selected))
                 return "break"
 
@@ -2746,13 +2746,13 @@ def show_save_files_screen(app):
                 height=28,
                 corner_radius=8,
                 font=app._font(11),
-                foreground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                foreground=SF_TEXT_MAIN,
                 placeholder_color=SF_TEXT_PLACEHOLDER,
                 background=row_bg_color,
                 fill=row_bg_color,
                 border_color=SF_BORDER_INPUT,
                 focus_fill=row_bg_color,
-                focus_border_color=SF_TEXT_INVERSE if row_selected else SF_PRIMARY,
+                focus_border_color=SF_PRIMARY,
                 disabled_fill=row_bg_color,
                 disabled_foreground=SF_TEXT_MUTED,
                 state="normal",
@@ -2760,8 +2760,8 @@ def show_save_files_screen(app):
             tag_entry = tag_input.entry
             tag_entry.configure(
                 justify="left",
-                fg=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
-                insertbackground=SF_TEXT_INVERSE if row_selected else SF_TEXT_MAIN,
+                fg=SF_TEXT_MAIN,
+                insertbackground=SF_TEXT_MAIN,
             )
             tag_entry.grid_configure(padx=(6, 8))
             tag_input.set(tag_display_value)
@@ -2809,7 +2809,7 @@ def show_save_files_screen(app):
                 tag_widget=tag_input,
                 doc_var=doc_type_var,
                 doc_icon=doc_expand_label,
-                selected=row_selected,
+                selected=False,
             ):
                 date_right = date_left + date_width
                 doc_right = doc_left + doc_width
@@ -2831,14 +2831,14 @@ def show_save_files_screen(app):
 
             row_canvas.bind("<Button-1>", on_row_canvas_click, add="+")
 
-            row_canvas.create_text(local_col_centers[5], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(11), anchor="center")
+            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=row_values["size"], fill=row_primary_text_color, font=app._font(11), anchor="center")
 
             status_text, status_color = get_status_display(row_values.get("status_code"))
-            row_canvas.create_text(local_col_centers[6], table_row_height // 2, text=status_text, fill=status_color, font=app._font(11, "bold"), anchor="center")
+            row_canvas.create_text(local_col_centers[7], table_row_height // 2, text=status_text, fill=status_color, font=app._font(11, "bold"), anchor="center")
 
             progress_ratio = max(0.0, min(1.0, float(row_values.get("progress_ratio", 0.0))))
-            progress_col_left = col_starts[7] - row2_inner_x1
-            progress_col_width = col_width_px[7]
+            progress_col_left = col_starts[8] - row2_inner_x1
+            progress_col_width = col_width_px[8]
             progress_pct_text = f"{int(round(progress_ratio * 100.0))}%"
 
             progress_text_w = 28

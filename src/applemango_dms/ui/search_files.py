@@ -1,7 +1,7 @@
 import tkinter as tk
 from datetime import date, timedelta
 import applemango_dms.config as config
-from applemango_dms.ui.workplace_menu import build_sidebar_nav
+from applemango_dms.ui.workplace_menu import render_workspace_sidebar_nav
 from applemango_dms.ui.widgets import RoundedInput
 
 try:
@@ -33,24 +33,10 @@ def show_search_files_screen(app):
     shell = app._create_workspace_shell()
     app.root.title("애플망고 DMS - 파일 검색")
 
-    build_sidebar_nav(
-        app,
-        shell["sidebar"],
-        "search",
-        [
-            ("save", "\U0001F4E4", "파일 저장", "새 파일을 업로드하거나\n기존 파일을 저장합니다.", app.show_save_files_screen, SF_STATUS_PROCESSING),
-            ("search", "\U0001F50D", "파일 검색", "저장한 파일을 검색하고\n열람합니다.", app.show_search_files_screen, SF_TEXT_DARK),
-            ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아갑니다.", app.show_workspace_exit_screen, SF_STATUS_FAILED),
-        ],
-        icon_photos={
-            "save": app.ui_icon_photos.get("workspace_file_save"),
-            "search": app.ui_icon_photos.get("workspace_file_search"),
-            "exit": app.ui_icon_photos.get("workspace_exit"),
-        },
-    )
+    render_workspace_sidebar_nav(app, shell["sidebar"], "search")
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 검색", "다양한 조건으로 파일을 검색할 수 있어요.")
+    app._build_workspace_page_header(outer, "파일 검색", "필요한 파일을 빠르게 찾고 관리할 수 있어요.")
 
     board = tk.Frame(outer, bg=SF_SURFACE, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)
@@ -77,6 +63,10 @@ def show_search_files_screen(app):
     search_result_count_var = tk.StringVar(value="검색 결과 (#건)")
     search_var = tk.StringVar(value="")
     search_box_inset = 15
+    # Horizontal insets for the two left cards.
+    # Increase left_cards_left_inset to grow the gap from the sidebar side.
+    left_cards_left_inset = 6
+    left_cards_right_inset = 0
     search_box_height = 48
     filter_row_top_gap = 10
     filter_row_height = 30
@@ -695,15 +685,23 @@ def show_search_files_screen(app):
         dropdown_state[expanded_key] = True
 
     def _layout_filter_row():
-        row_width = max(140, left_top_card.winfo_width() - (search_box_inset * 2))
+        top_card_width = max(100, left_top_card.winfo_width())
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(card_x1 + 40, top_card_width - 1 - left_cards_right_inset)
+        card_inner_width = max(100, card_x2 - card_x1)
+        row_width = max(140, card_inner_width - (search_box_inset * 2))
         row_height = filter_row_height
         row_y = search_box_inset + search_box_height + filter_row_top_gap
-        filter_row.place(x=search_box_inset, y=row_y, width=row_width, height=row_height)
+        filter_row.place(x=card_x1 + search_box_inset, y=row_y, width=row_width, height=row_height)
 
     def _layout_filter_content():
-        content_x = search_box_inset
+        top_card_width = max(100, left_top_card.winfo_width())
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(card_x1 + 40, top_card_width - 1 - left_cards_right_inset)
+        card_inner_width = max(100, card_x2 - card_x1)
+        content_x = card_x1 + search_box_inset
         content_y = search_box_inset + search_box_height + filter_row_top_gap + filter_row_height + filter_content_top_gap
-        content_width = max(140, left_top_card.winfo_width() - (search_box_inset * 2))
+        content_width = max(140, card_inner_width - (search_box_inset * 2))
         max_visible_height = max(0, left_top_card.winfo_height() - content_y - filter_content_bottom_padding)
         visible_height = min(filter_content_height, max_visible_height)
 
@@ -1025,11 +1023,13 @@ def show_search_files_screen(app):
         card_width = max(100, card_canvas.winfo_width())
         full_height = max(100, card_canvas.winfo_height())
         card_height = max(100, full_height - bottom_shrink)
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(card_x1 + 40, card_width - 1 - left_cards_right_inset)
         app._smooth_rounded_rect(
             card_canvas,
+            card_x1,
             1,
-            1,
-            card_width - 1,
+            card_x2,
             card_height - 1,
             24,
             fill=colors.SURFACE_ALT,
@@ -1042,13 +1042,15 @@ def show_search_files_screen(app):
         card_width = max(100, card_canvas.winfo_width())
         full_height = max(100, card_canvas.winfo_height())
         card_height = max(100, full_height - 12)
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(card_x1 + 40, card_width - 1 - left_cards_right_inset)
 
         row_weights = [10.0, 7.5, 72.5, 10.0]
         row_colors = [colors.SURFACE_ALT, colors.SURFACE_ACCENT_SOFT, colors.SURFACE_ALT, colors.SURFACE_ALT]
 
         inner_padding = 8
-        inner_x1, inner_y1 = inner_padding, inner_padding
-        inner_x2, inner_y2 = card_width - inner_padding, card_height - inner_padding
+        inner_x1, inner_y1 = card_x1 + inner_padding, inner_padding
+        inner_x2, inner_y2 = card_x2 - inner_padding, card_height - inner_padding
         inner_height = max(1, inner_y2 - inner_y1)
 
         collapsed_top_height, _expanded_top_height, available_height = _compute_left_top_targets()
@@ -1212,9 +1214,13 @@ def show_search_files_screen(app):
         card_canvas.result_table_icons_ref = result_table_icons
 
     def _draw_search_box():
-        bar_width = max(220, left_top_card.winfo_width() - (search_box_inset * 2))
+        top_card_width = max(100, left_top_card.winfo_width())
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(card_x1 + 40, top_card_width - 1 - left_cards_right_inset)
+        card_inner_width = max(100, card_x2 - card_x1)
+        bar_width = max(220, card_inner_width - (search_box_inset * 2))
         search_box_holder.place(
-            x=search_box_inset,
+            x=card_x1 + search_box_inset,
             y=search_box_inset,
             width=bar_width,
             height=search_box_height,

@@ -79,7 +79,7 @@ def show_workspace_selection_screen(app):
     ).pack(anchor="w")
     tk.Label(
         left_header,
-        text="워크스페이스를 선택해주세요.",
+        text="작업할 워크스페이스를 선택하세요.",
         font=app._font(12),
         fg=WS_TEXT_PRIMARY,
         bg=WS_CARD_BG,
