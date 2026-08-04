@@ -511,7 +511,7 @@ def show_workspace_exit_screen(app):
     render_workspace_sidebar_nav(app, shell["sidebar"], "exit")
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "워크스페이스 나가기", "현재 작업을 마치고 워크스페이스 목록으로 돌아갑니다.")
+    app._build_workspace_page_header(outer, "워크스페이스 나가기", "현재 워크스페이스를 나가고 목록으로 돌아가요.")
 
     action_row = tk.Frame(outer, bg=outer.cget("bg"))
     action_row.pack(fill="x", padx=20, pady=(4, 0))

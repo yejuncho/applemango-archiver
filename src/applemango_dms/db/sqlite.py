@@ -27,6 +27,32 @@ class ArchiveDatabase:
         SEARCH_FIELD_FILE_EXT,
     }
 
+    SORT_FIELD_ORIGINAL_FILENAME = "original_filename"
+    SORT_FIELD_DOCUMENT_TYPE = "document_type"
+    SORT_FIELD_DOCUMENT_DATE = "document_date"
+    SORT_FIELD_UPLOADED_BY = "uploaded_by"
+    SORT_FIELD_ARCHIVED_AT = "archived_at"
+    SORT_FIELD_FILE_SIZE = "file_size"
+    SORT_FIELD_FILE_EXT = "file_ext"
+
+    ALLOWED_SEARCH_SORT_FIELDS = {
+        SORT_FIELD_ORIGINAL_FILENAME,
+        SORT_FIELD_DOCUMENT_TYPE,
+        SORT_FIELD_DOCUMENT_DATE,
+        SORT_FIELD_UPLOADED_BY,
+        SORT_FIELD_ARCHIVED_AT,
+        SORT_FIELD_FILE_SIZE,
+        SORT_FIELD_FILE_EXT,
+    }
+
+    SORT_DIRECTION_ASC = "asc"
+    SORT_DIRECTION_DESC = "desc"
+
+    ALLOWED_SORT_DIRECTIONS = {
+        SORT_DIRECTION_ASC,
+        SORT_DIRECTION_DESC,
+    }
+
     TAG_MATCH_ALL = "all"
     TAG_MATCH_ANY = "any"
 
@@ -440,61 +466,25 @@ class ArchiveDatabase:
             ),
         }
 
-    def search_files(
+    def _build_search_where(
         self,
-        workspace_id,
-        *,
-        search_text=None,
-        search_field="all",
-        filters=None,
-        statuses=None,
-        limit=200,
-        offset=0,
+        request,
     ):
-        """
-        Search file records within one workspace.
-
-        Simple search:
-            search_text is interpreted according to
-            search_field.
-
-        Detailed search:
-            values in filters are combined with the simple
-            search using AND.
-
-        Defaults:
-            active records only;
-            all supplied tags must match;
-            newest document dates first.
-
-        Returns:
-            A list of file dictionaries.
-        """
-        request = self._normalize_search_request(
-            workspace_id,
-            search_text=search_text,
-            search_field=search_field,
-            filters=filters,
-            statuses=statuses,
-            limit=limit,
-            offset=offset,
-        )
-
-        normalized_workspace_id = request["workspace_id"]
-        normalized_search_text = request["search_text"]
-        normalized_search_field = request["search_field"]
-        normalized_filters = request["filters"]
-        normalized_statuses = request["statuses"]
-        normalized_limit = request["limit"]
-        normalized_offset = request["offset"]
-
-        (
-            relevance_sql,
-            relevance_params,
-        ) = self._build_relevance_sql(
-            normalized_search_text,
-            normalized_search_field,
-        )
+        normalized_workspace_id = request[
+            "workspace_id"
+        ]
+        normalized_search_text = request[
+            "search_text"
+        ]
+        normalized_search_field = request[
+            "search_field"
+        ]
+        normalized_filters = request[
+            "filters"
+        ]
+        normalized_statuses = request[
+            "statuses"
+        ]
 
         status_placeholders = ",".join(
             "?" for _ in normalized_statuses
@@ -796,14 +786,89 @@ class ArchiveDatabase:
 
         where_sql = "\nAND ".join(clauses)
 
-        query_params = [
+        return where_sql, params
+
+    def search_files_page(
+        self,
+        workspace_id,
+        *,
+        search_text=None,
+        search_field="all",
+        filters=None,
+        statuses=None,
+        sort_field=None,
+        sort_direction=None,
+        limit=7,
+        offset=0,
+    ):
+        """
+        Return one database-backed search page and the exact
+        number of matching records.
+        """
+        request = self._normalize_search_request(
+            workspace_id,
+            search_text=search_text,
+            search_field=search_field,
+            filters=filters,
+            statuses=statuses,
+            limit=limit,
+            offset=offset,
+        )
+
+        (
+            normalized_sort_field,
+            normalized_sort_direction,
+        ) = self._normalize_search_sort(
+            sort_field,
+            sort_direction,
+        )
+
+        (
+            relevance_sql,
+            relevance_params,
+        ) = self._build_relevance_sql(
+            request["search_text"],
+            request["search_field"],
+        )
+
+        where_sql, where_params = (
+            self._build_search_where(request)
+        )
+
+        order_sql = self._build_search_order_sql(
+            normalized_sort_field,
+            normalized_sort_direction,
+        )
+
+        normalized_limit = request["limit"]
+        normalized_offset = request["offset"]
+
+        result_params = [
             *relevance_params,
-            *params,
+            *where_params,
             normalized_limit,
             normalized_offset,
         ]
 
         with self._connect() as conn:
+            count_row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total_count
+
+                FROM files f
+
+                INNER JOIN workspaces w
+                    ON w.id = f.workspace_id
+
+                INNER JOIN document_types dt
+                    ON dt.id = f.document_type_id
+                   AND dt.workspace_id = f.workspace_id
+
+                WHERE {where_sql}
+                """,
+                where_params,
+            ).fetchone()
+
             rows = conn.execute(
                 f"""
                 SELECT
@@ -863,22 +928,61 @@ class ArchiveDatabase:
 
                 WHERE {where_sql}
 
-                ORDER BY
-                    relevance_score DESC,
-                    f.document_date DESC,
-                    f.archived_at DESC,
-                    f.id DESC
+                ORDER BY {order_sql}
 
                 LIMIT ?
                 OFFSET ?
                 """,
-                query_params,
+                result_params,
             ).fetchall()
 
-        return [
+        results = [
             self._file_row_to_dict(row)
             for row in rows
         ]
+
+        total_count = int(
+            count_row["total_count"]
+            if count_row is not None
+            else 0
+        )
+
+        return {
+            "results": results,
+            "total_count": total_count,
+            "limit": normalized_limit,
+            "offset": normalized_offset,
+            "sort_field": normalized_sort_field,
+            "sort_direction": normalized_sort_direction,
+        }
+
+    def search_files(
+        self,
+        workspace_id,
+        *,
+        search_text=None,
+        search_field="all",
+        filters=None,
+        statuses=None,
+        limit=200,
+        offset=0,
+    ):
+        """
+        Compatibility wrapper returning only result records.
+        """
+        page = self.search_files_page(
+            workspace_id,
+            search_text=search_text,
+            search_field=search_field,
+            filters=filters,
+            statuses=statuses,
+            sort_field=None,
+            sort_direction=None,
+            limit=limit,
+            offset=offset,
+        )
+
+        return page["results"]
 
     def get_file_by_id(
         self,
@@ -2101,6 +2205,88 @@ class ArchiveDatabase:
             )
 
         return normalized
+
+    @classmethod
+    def _normalize_search_sort(
+        cls,
+        sort_field,
+        sort_direction,
+    ):
+        if sort_field is None or str(sort_field).strip() == "":
+            return None, None
+
+        normalized_field = str(
+            sort_field
+        ).strip().lower()
+
+        if normalized_field not in cls.ALLOWED_SEARCH_SORT_FIELDS:
+            raise ValueError(
+                f"Unsupported search sort field: "
+                f"{normalized_field}"
+            )
+
+        normalized_direction = str(
+            sort_direction
+            or cls.SORT_DIRECTION_ASC
+        ).strip().lower()
+
+        if (
+            normalized_direction
+            not in cls.ALLOWED_SORT_DIRECTIONS
+        ):
+            raise ValueError(
+                f"Unsupported search sort direction: "
+                f"{normalized_direction}"
+            )
+
+        return (
+            normalized_field,
+            normalized_direction,
+        )
+
+    @classmethod
+    def _build_search_order_sql(
+        cls,
+        sort_field,
+        sort_direction,
+    ):
+        if sort_field is None:
+            return """
+                relevance_score DESC,
+                f.document_date DESC,
+                f.archived_at DESC,
+                f.id DESC
+            """
+
+        column_map = {
+            cls.SORT_FIELD_ORIGINAL_FILENAME:
+                "f.original_filename COLLATE NOCASE",
+            cls.SORT_FIELD_DOCUMENT_TYPE:
+                "dt.name COLLATE NOCASE",
+            cls.SORT_FIELD_DOCUMENT_DATE:
+                "f.document_date",
+            cls.SORT_FIELD_UPLOADED_BY:
+                "f.uploaded_by COLLATE NOCASE",
+            cls.SORT_FIELD_ARCHIVED_AT:
+                "f.archived_at",
+            cls.SORT_FIELD_FILE_SIZE:
+                "f.file_size",
+            cls.SORT_FIELD_FILE_EXT:
+                "f.file_ext COLLATE NOCASE",
+        }
+
+        direction_sql = (
+            "DESC"
+            if sort_direction == cls.SORT_DIRECTION_DESC
+            else "ASC"
+        )
+
+        column_sql = column_map[sort_field]
+
+        return f"""
+            {column_sql} {direction_sql},
+            f.id DESC
+        """
 
     def _normalize_statuses(self, statuses):
         if statuses is None:

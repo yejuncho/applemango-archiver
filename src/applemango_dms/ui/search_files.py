@@ -1,6 +1,9 @@
+import sqlite3
 import tkinter as tk
-from datetime import date, timedelta
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 import applemango_dms.config as config
+import applemango_dms.state as state
 from applemango_dms.ui.workplace_menu import render_workspace_sidebar_nav
 from applemango_dms.ui.widgets import RoundedInput
 
@@ -29,6 +32,18 @@ SF_PRIMARY = colors.PRIMARY
 SF_INPUT_IDLE_BORDER = colors.BORDER
 SF_INPUT_FOCUS_BORDER = colors.PRIMARY_PRESSED
 
+SF_RESULTS_PER_PAGE = 7
+SF_VISIBLE_PAGE_BUTTONS = 5
+SF_CALENDAR_WEEKDAYS = (
+    "월",
+    "화",
+    "수",
+    "목",
+    "금",
+    "토",
+    "일",
+)
+
 def show_search_files_screen(app):
     shell = app._create_workspace_shell()
     app.root.title("애플망고 DMS - 파일 검색")
@@ -55,12 +70,15 @@ def show_search_files_screen(app):
     left_top_card = tk.Canvas(left_col, bg=SF_SURFACE, highlightthickness=0, bd=0)
 
     left_bottom_card = tk.Canvas(left_col, bg=SF_SURFACE, highlightthickness=0, bd=0)
+    left_bottom_card.configure(
+        takefocus=True,
+    )
 
     right_card = tk.Canvas(split, bg=SF_SURFACE, highlightthickness=0, bd=0)
     right_card.grid(row=0, column=1, sticky="nsew")
 
     search_placeholder_text = "파일명, 문서 유형, 태그, 업로더 등으로 검색할 수 있어요."
-    search_result_count_var = tk.StringVar(value="검색 결과 (#건)")
+    search_result_count_var = tk.StringVar(value="검색 결과")
     search_var = tk.StringVar(value="")
     search_box_inset = 15
     # Horizontal insets for the two left cards.
@@ -68,6 +86,9 @@ def show_search_files_screen(app):
     left_cards_left_inset = 6
     left_cards_right_inset = 0
     search_box_height = 48
+    search_button_width = 78
+    reset_button_width = 88
+    search_control_gap = 10
     filter_row_top_gap = 10
     filter_row_height = 30
     filter_content_top_gap = 8
@@ -75,6 +96,12 @@ def show_search_files_screen(app):
     filter_content_bottom_padding = 14
 
     search_box_holder = tk.Frame(left_top_card, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
+    search_input_holder = tk.Frame(
+        search_box_holder,
+        bg=colors.SURFACE_ALT,
+        highlightthickness=0,
+        bd=0,
+    )
 
     icon_size = 20
     icon_gap = 4
@@ -108,6 +135,46 @@ def show_search_files_screen(app):
         config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "search_files" / "calendar.svg",
         max_width=14,
         max_height=14,
+    )
+    far_before_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT
+        / "assets"
+        / "icons"
+        / "workspace"
+        / "search_files"
+        / "far_before.svg",
+        max_width=16,
+        max_height=16,
+    )
+    before_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT
+        / "assets"
+        / "icons"
+        / "workspace"
+        / "search_files"
+        / "before.svg",
+        max_width=16,
+        max_height=16,
+    )
+    after_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT
+        / "assets"
+        / "icons"
+        / "workspace"
+        / "search_files"
+        / "after.svg",
+        max_width=16,
+        max_height=16,
+    )
+    far_after_icon_photo = load_svg_photo(
+        config.PROJECT_ROOT
+        / "assets"
+        / "icons"
+        / "workspace"
+        / "search_files"
+        / "far_after.svg",
+        max_width=16,
+        max_height=16,
     )
 
     filter_row = tk.Frame(left_top_card, bg=colors.SURFACE_ALT, highlightthickness=0, bd=0)
@@ -157,7 +224,46 @@ def show_search_files_screen(app):
     file_type_var = tk.StringVar(value="")
     uploader_var = tk.StringVar(value="")
 
-    doc_type_options = list(config.DEFAULT_DOCUMENT_TYPES)
+    search_state = {
+        "results": [],
+        "total_count": 0,
+        "query": None,
+        "database_filters": None,
+        "selected_file_id": None,
+        "selected_file_ids": set(),
+        "is_searching": False,
+        "is_loading_page": False,
+        "has_searched": False,
+        "error": None,
+    }
+
+    document_type_records = []
+    document_type_name_to_id = {}
+    doc_type_options = []
+
+    workspace_id = getattr(state, "active_workspace_id", None)
+
+    try:
+        document_type_records = app.db.get_document_types(
+            workspace_id
+        )
+
+        document_type_name_to_id = {
+            record["name"]: int(record["id"])
+            for record in document_type_records
+        }
+
+        doc_type_options = [
+            record["name"]
+            for record in document_type_records
+        ]
+
+    except Exception as exc:
+        print(
+            "Unable to load workspace document types:",
+            exc,
+        )
+
     file_type_options = [
         ".doc", ".docx", ".txt", ".pdf", ".xls", ".xlsx", ".xlsm", ".csv", ".ppt", ".pptx", ".pptm",
         ".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".webp", ".svg",
@@ -176,6 +282,12 @@ def show_search_files_screen(app):
         "doc_type_popup": None,
         "file_type_popup": None,
     }
+    calendar_popup_state = {
+        "popup": None,
+        "field_kind": None,
+        "display_year": None,
+        "display_month": None,
+    }
 
     filter_panel_state = {
         "expanded": False,
@@ -193,6 +305,13 @@ def show_search_files_screen(app):
 
     result_table_state = {
         "select_all_checked": False,
+        "page_index": 0,
+        "rows_per_page": SF_RESULTS_PER_PAGE,
+        "hovered_file_id": None,
+    }
+    result_sort_state = {
+        "key": None,
+        "direction": None,
     }
 
     result_table_icons = {
@@ -208,6 +327,8 @@ def show_search_files_screen(app):
         ),
     }
 
+    search_action_button = None
+
     def _is_descendant_of(widget, ancestor):
         current = widget
         while current is not None:
@@ -217,6 +338,20 @@ def show_search_files_screen(app):
         return False
 
     def _on_click_outside_search_box(event):
+        calendar_popup = calendar_popup_state.get(
+            "popup"
+        )
+
+        if (
+            calendar_popup is not None
+            and calendar_popup.winfo_exists()
+            and _is_descendant_of(
+                event.widget,
+                calendar_popup,
+            )
+        ):
+            return
+
         for popup_key in ("doc_type_popup", "file_type_popup"):
             popup = dropdown_state.get(popup_key)
             if popup is not None and popup.winfo_exists() and _is_descendant_of(event.widget, popup):
@@ -249,6 +384,15 @@ def show_search_files_screen(app):
 
         _close_dropdown_popup("doc_type")
         _close_dropdown_popup("file_type")
+        _set_dropdown_icon(
+            doc_type_field["toggle"],
+            False,
+        )
+        _set_dropdown_icon(
+            file_type_field["toggle"],
+            False,
+        )
+        _close_calendar_popup()
 
     def _start_search_placeholder():
         search_text_entry.focus_set()
@@ -256,6 +400,367 @@ def show_search_files_screen(app):
     def _clear_search_text():
         search_var.set("")
         search_text_entry.focus_set()
+
+    def _collect_search_filters():
+        return {
+            "query": search_var.get().strip(),
+            "date_from": date_from_var.get().strip(),
+            "date_to": date_to_var.get().strip(),
+            "document_type": doc_type_var.get().strip(),
+            "file_type": file_type_var.get().strip(),
+            "uploaded_by": uploader_var.get().strip(),
+        }
+
+    def _normalize_search_filters(raw_filters):
+        normalized = dict(raw_filters)
+
+        for key, value in normalized.items():
+            if isinstance(value, str):
+                normalized[key] = value.strip()
+
+        if normalized["date_from"] == "-":
+            normalized["date_from"] = ""
+
+        if normalized["date_to"] == "-":
+            normalized["date_to"] = ""
+
+        selected_document_type = normalized.pop(
+            "document_type",
+            "",
+        )
+
+        if selected_document_type == "모든 문서 유형":
+            selected_document_type = ""
+
+        normalized["document_type_id"] = (
+            document_type_name_to_id.get(
+                selected_document_type
+            )
+            if selected_document_type
+            else None
+        )
+
+        if normalized["file_type"] == "모든 파일 종류":
+            normalized["file_type"] = ""
+
+        return normalized
+
+    def _build_database_filters(filters):
+        (
+            normalized_date_from,
+            normalized_date_to,
+        ) = _normalize_search_date_range(
+            filters["date_from"],
+            filters["date_to"],
+        )
+
+        return {
+            "document_date_from": (
+                normalized_date_from
+            ),
+            "document_date_to": (
+                normalized_date_to
+            ),
+            "document_type_id": (
+                filters["document_type_id"]
+            ),
+            "uploaded_by": (
+                filters["uploaded_by"] or None
+            ),
+            "file_ext": (
+                filters["file_type"] or None
+            ),
+        }
+
+    def _reset_search_selection():
+        search_state["selected_file_id"] = None
+        search_state["selected_file_ids"].clear()
+
+        result_table_state["select_all_checked"] = False
+        result_table_state["hovered_file_id"] = None
+        result_table_state["page_index"] = 0
+
+    def _reset_search_screen():
+        search_var.set("")
+        date_from_var.set("")
+        date_to_var.set("")
+        doc_type_var.set("")
+        file_type_var.set("")
+        uploader_var.set("")
+
+        search_state["results"] = []
+        search_state["total_count"] = 0
+        search_state["query"] = None
+        search_state["database_filters"] = None
+        search_state["error"] = None
+        search_state["is_searching"] = False
+        search_state["is_loading_page"] = False
+        search_state["has_searched"] = False
+
+        result_sort_state["key"] = None
+        result_sort_state["direction"] = None
+
+        _reset_search_selection()
+
+        _close_dropdown_popup("doc_type")
+        _close_dropdown_popup("file_type")
+        _close_calendar_popup()
+
+        _set_dropdown_icon(
+            doc_type_field["toggle"],
+            False,
+        )
+        _set_dropdown_icon(
+            file_type_field["toggle"],
+            False,
+        )
+
+        _set_quick_button_state(None)
+
+        search_result_count_var.set(
+            "검색 결과"
+        )
+
+        _draw_results_table()
+        _draw_file_details()
+
+        search_text_entry.focus_set()
+
+    def _set_search_busy(is_busy):
+        busy = bool(is_busy)
+
+        search_state["is_loading_page"] = busy
+
+        if search_action_button is not None:
+            search_action_button.set_enabled(
+                not busy
+            )
+
+    def _load_search_page(
+        page_index,
+        *,
+        clear_detail=True,
+    ):
+        normalized_page_index = max(
+            0,
+            int(page_index),
+        )
+
+        rows_per_page = SF_RESULTS_PER_PAGE
+        offset = normalized_page_index * rows_per_page
+
+        page = app.db.search_files_page(
+            workspace_id,
+            search_text=search_state["query"],
+            search_field="all",
+            filters=search_state["database_filters"],
+            statuses=None,
+            sort_field=result_sort_state["key"],
+            sort_direction=result_sort_state["direction"],
+            limit=rows_per_page,
+            offset=offset,
+        )
+
+        search_state["error"] = None
+
+        search_state["results"] = list(
+            page["results"]
+        )
+        search_state["total_count"] = int(
+            page["total_count"]
+        )
+
+        result_table_state["page_index"] = (
+            normalized_page_index
+        )
+        result_table_state["hovered_file_id"] = None
+        result_table_state["select_all_checked"] = False
+
+        if clear_detail:
+            search_state["selected_file_id"] = None
+
+        search_result_count_var.set(
+            f"검색 결과 "
+            f"({search_state['total_count']}건)"
+        )
+
+        _clamp_result_page()
+
+    def _request_search_page(
+        page_index,
+        *,
+        clear_detail=True,
+        redraw=True,
+    ):
+        if search_state["is_loading_page"]:
+            return False
+
+        previous_results = list(
+            search_state["results"]
+        )
+        previous_total_count = int(
+            search_state["total_count"] or 0
+        )
+        previous_page_index = int(
+            result_table_state["page_index"]
+        )
+        previous_selected_file_id = (
+            search_state["selected_file_id"]
+        )
+
+        _set_search_busy(True)
+
+        try:
+            _load_search_page(
+                page_index,
+                clear_detail=clear_detail,
+            )
+
+        except (
+            ValueError,
+            TypeError,
+            LookupError,
+            sqlite3.Error,
+        ) as exc:
+            search_state["results"] = previous_results
+            search_state["total_count"] = (
+                previous_total_count
+            )
+            result_table_state["page_index"] = (
+                previous_page_index
+            )
+            search_state["selected_file_id"] = (
+                previous_selected_file_id
+            )
+            search_state["error"] = str(exc)
+
+            print("Search page load failed:", exc)
+            return False
+
+        except Exception as exc:
+            search_state["results"] = previous_results
+            search_state["total_count"] = (
+                previous_total_count
+            )
+            result_table_state["page_index"] = (
+                previous_page_index
+            )
+            search_state["selected_file_id"] = (
+                previous_selected_file_id
+            )
+            search_state["error"] = str(exc)
+
+            print(
+                "Unexpected search page error:",
+                exc,
+            )
+            return False
+
+        finally:
+            _set_search_busy(False)
+
+            if redraw:
+                _draw_results_table()
+                _draw_file_details()
+
+        return True
+
+    def _run_search(_event=None):
+        if search_state["is_searching"]:
+            return "break"
+
+        _close_calendar_popup()
+
+        search_state["is_searching"] = True
+        search_state["error"] = None
+
+        if search_action_button is not None:
+            search_action_button.set_enabled(False)
+
+        try:
+            search_state["has_searched"] = True
+
+            raw_filters = _collect_search_filters()
+            filters = _normalize_search_filters(
+                raw_filters
+            )
+            database_filters = (
+                _build_database_filters(filters)
+            )
+
+            search_state["query"] = (
+                filters["query"] or None
+            )
+            search_state["database_filters"] = (
+                database_filters
+            )
+
+            result_sort_state["key"] = None
+            result_sort_state["direction"] = None
+
+            _reset_search_selection()
+
+            _load_search_page(
+                0,
+                clear_detail=True,
+            )
+
+            print(
+                "Search request:",
+                {
+                    "search_text": filters["query"],
+                    "filters": database_filters,
+                },
+            )
+            print("Search page loaded.")
+
+        except (
+            ValueError,
+            TypeError,
+            LookupError,
+            sqlite3.Error,
+        ) as exc:
+            search_state["results"] = []
+            search_state["total_count"] = 0
+            search_state["query"] = None
+            search_state["database_filters"] = None
+
+            result_sort_state["key"] = None
+            result_sort_state["direction"] = None
+
+            search_state["error"] = str(exc)
+            _reset_search_selection()
+
+            search_result_count_var.set("검색 결과 (0건)")
+
+            print("Search failed:", exc)
+
+        except Exception as exc:
+            search_state["results"] = []
+            search_state["total_count"] = 0
+            search_state["query"] = None
+            search_state["database_filters"] = None
+
+            result_sort_state["key"] = None
+            result_sort_state["direction"] = None
+
+            search_state["error"] = str(exc)
+            _reset_search_selection()
+
+            search_result_count_var.set("검색 결과 (0건)")
+
+            print("Unexpected search error:", exc)
+
+        finally:
+            search_state["is_searching"] = False
+
+            if search_action_button is not None:
+                search_action_button.set_enabled(True)
+
+            _draw_results_table()
+            _draw_file_details()
+
+        return "break"
 
     def is_leap_year(year_value):
         return (year_value % 4 == 0 and year_value % 100 != 0) or (year_value % 400 == 0)
@@ -268,6 +773,119 @@ def show_search_files_screen(app):
         if month_value == 2:
             return 29 if is_leap_year(year_value) else 28
         return 31
+
+    def _normalize_search_date(
+        value,
+        *,
+        field_name,
+        is_end_date,
+    ):
+        text = str(value or "").strip()
+
+        if not text or text == "-":
+            return None
+
+        parts = text.split("-")
+
+        try:
+            if len(parts) == 1:
+                year_value = int(parts[0])
+
+                if not 1 <= year_value <= 9999:
+                    raise ValueError
+
+                if is_end_date:
+                    return f"{year_value:04d}-12-31"
+
+                return f"{year_value:04d}-01-01"
+
+            if len(parts) == 2:
+                year_value = int(parts[0])
+                month_value = int(parts[1])
+
+                if not 1 <= year_value <= 9999:
+                    raise ValueError
+
+                if not 1 <= month_value <= 12:
+                    raise ValueError
+
+                if is_end_date:
+                    final_day = monthrange(
+                        year_value,
+                        month_value,
+                    )[1]
+
+                    return (
+                        f"{year_value:04d}-"
+                        f"{month_value:02d}-"
+                        f"{final_day:02d}"
+                    )
+
+                return (
+                    f"{year_value:04d}-"
+                    f"{month_value:02d}-01"
+                )
+
+            if len(parts) == 3:
+                year_value = int(parts[0])
+                month_value = int(parts[1])
+                day_value = int(parts[2])
+
+                if not 1 <= year_value <= 9999:
+                    raise ValueError
+
+                if not 1 <= month_value <= 12:
+                    raise ValueError
+
+                final_day = monthrange(
+                    year_value,
+                    month_value,
+                )[1]
+
+                if not 1 <= day_value <= final_day:
+                    raise ValueError
+
+                return (
+                    f"{year_value:04d}-"
+                    f"{month_value:02d}-"
+                    f"{day_value:02d}"
+                )
+
+        except (TypeError, ValueError):
+            pass
+
+        raise ValueError(
+            f"{field_name} 형식이 올바르지 않아요. "
+            "연도, 연도-월 또는 연도-월-일 형식으로 "
+            "입력해 주세요."
+        )
+
+    def _normalize_search_date_range(
+        date_from,
+        date_to,
+    ):
+        normalized_from = _normalize_search_date(
+            date_from,
+            field_name="시작일",
+            is_end_date=False,
+        )
+
+        normalized_to = _normalize_search_date(
+            date_to,
+            field_name="종료일",
+            is_end_date=True,
+        )
+
+        if (
+            normalized_from is not None
+            and normalized_to is not None
+            and normalized_from > normalized_to
+        ):
+            raise ValueError(
+                "시작일은 종료일보다 늦을 수 없어요."
+            )
+
+        return normalized_from, normalized_to
 
     def normalize_date_input(raw_value):
         current_year = 9999
@@ -395,6 +1013,185 @@ def show_search_files_screen(app):
         canvas.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=border_width)
         canvas.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=border_width)
         canvas.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=border_width)
+
+    def _create_search_action_button(
+        parent,
+        *,
+        text,
+        command,
+        width,
+        primary=False,
+        icon_photo=None,
+    ):
+        canvas = tk.Canvas(
+            parent,
+            width=width,
+            height=search_box_height,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+        )
+
+        button_state = {
+            "hovered": False,
+            "enabled": True,
+        }
+
+        def _redraw(_event=None):
+            canvas.delete("all")
+
+            canvas_width = max(
+                20,
+                canvas.winfo_width(),
+            )
+            canvas_height = max(
+                20,
+                canvas.winfo_height(),
+            )
+
+            hovered = button_state["hovered"]
+            enabled = button_state["enabled"]
+
+            if primary:
+                fill_color = (
+                    colors.PRIMARY_HOVER
+                    if hovered and enabled
+                    else SF_PRIMARY
+                )
+                border_color = SF_PRIMARY
+                text_color = (
+                    colors.TEXT_INVERSE
+                    if enabled
+                    else SF_TEXT_PLACEHOLDER
+                )
+            else:
+                fill_color = (
+                    SF_SURFACE_HOVER_SOFT
+                    if hovered and enabled
+                    else colors.SURFACE_ALT
+                )
+                border_color = (
+                    SF_INPUT_FOCUS_BORDER
+                    if hovered and enabled
+                    else SF_INPUT_IDLE_BORDER
+                )
+                text_color = (
+                    SF_TEXT_DARK
+                    if enabled
+                    else SF_TEXT_PLACEHOLDER
+                )
+
+            _draw_plain_rounded_rect(
+                canvas,
+                1,
+                1,
+                canvas_width - 1,
+                canvas_height - 1,
+                10,
+                fill=fill_color,
+                outline=border_color,
+                border_width=1,
+            )
+
+            if icon_photo is not None:
+                icon_x = (
+                    canvas_width / 2.0
+                    - 16
+                )
+
+                canvas.create_image(
+                    icon_x,
+                    canvas_height / 2.0,
+                    image=icon_photo,
+                    anchor="center",
+                )
+
+                canvas.create_text(
+                    icon_x + 14,
+                    canvas_height / 2.0,
+                    text=text,
+                    fill=text_color,
+                    font=app._font(10, "bold"),
+                    anchor="w",
+                )
+            else:
+                canvas.create_text(
+                    canvas_width / 2.0,
+                    canvas_height / 2.0,
+                    text=text,
+                    fill=text_color,
+                    font=app._font(10, "bold"),
+                    anchor="center",
+                )
+
+            canvas.create_rectangle(
+                0,
+                0,
+                canvas_width,
+                canvas_height,
+                fill="",
+                outline="",
+                tags=("action_button",),
+            )
+
+        def _on_enter(_event=None):
+            if not button_state["enabled"]:
+                return
+
+            button_state["hovered"] = True
+            _redraw()
+
+        def _on_leave(_event=None):
+            button_state["hovered"] = False
+            _redraw()
+
+        def _on_click(_event=None):
+            if not button_state["enabled"]:
+                return "break"
+
+            command()
+            return "break"
+
+        def _set_enabled(enabled):
+            button_state["enabled"] = bool(enabled)
+            button_state["hovered"] = False
+
+            canvas.configure(
+                cursor=(
+                    "hand2"
+                    if button_state["enabled"]
+                    else ""
+                )
+            )
+            _redraw()
+
+        canvas.bind(
+            "<Configure>",
+            _redraw,
+            add="+",
+        )
+        canvas.bind(
+            "<Enter>",
+            _on_enter,
+            add="+",
+        )
+        canvas.bind(
+            "<Leave>",
+            _on_leave,
+            add="+",
+        )
+        canvas.bind(
+            "<Button-1>",
+            _on_click,
+            add="+",
+        )
+
+        canvas.image = icon_photo
+        canvas.set_enabled = _set_enabled
+
+        _redraw()
+        return canvas
 
     def _color_to_rgb(color_value):
         r16, g16, b16 = app.root.winfo_rgb(color_value)
@@ -594,6 +1391,531 @@ def show_search_files_screen(app):
         dropdown_state[popup_key] = None
         dropdown_state[expanded_key] = False
 
+    def _close_calendar_popup():
+        popup = calendar_popup_state.get("popup")
+
+        if (
+            popup is not None
+            and popup.winfo_exists()
+        ):
+            popup.destroy()
+
+        calendar_popup_state["popup"] = None
+        calendar_popup_state["field_kind"] = None
+
+    def _resolve_calendar_start_date(value):
+        text = str(value or "").strip()
+
+        if not text or text == "-":
+            return date.today()
+
+        for date_format in (
+            "%Y-%m-%d",
+            "%Y-%m",
+            "%Y",
+        ):
+            try:
+                parsed = datetime.strptime(
+                    text,
+                    date_format,
+                )
+
+                return parsed.date()
+
+            except ValueError:
+                continue
+
+        return date.today()
+
+    def _shift_calendar_month(
+        year_value,
+        month_value,
+        direction,
+    ):
+        minimum_month_index = 1 * 12
+        maximum_month_index = (
+            9999 * 12
+        ) + 11
+
+        month_index = (
+            int(year_value) * 12
+            + int(month_value)
+            - 1
+            + int(direction)
+        )
+
+        month_index = max(
+            minimum_month_index,
+            min(
+                maximum_month_index,
+                month_index,
+            ),
+        )
+
+        shifted_year = month_index // 12
+        shifted_month = (
+            month_index % 12
+        ) + 1
+
+        return shifted_year, shifted_month
+
+    def _create_calendar_control(
+        parent,
+        *,
+        text,
+        command,
+        width=28,
+    ):
+        control = tk.Label(
+            parent,
+            text=text,
+            width=max(1, int(width / 10)),
+            bg=colors.SURFACE_ALT,
+            fg=SF_TEXT_DARK,
+            font=app._font(10, "bold"),
+            cursor="hand2",
+            anchor="center",
+            padx=4,
+            pady=3,
+        )
+
+        def _on_enter(_event=None):
+            control.configure(
+                bg=SF_SURFACE_HOVER_SOFT
+            )
+
+        def _on_leave(_event=None):
+            control.configure(
+                bg=colors.SURFACE_ALT
+            )
+
+        def _on_click(_event=None):
+            command()
+            return "break"
+
+        control.bind("<Enter>", _on_enter)
+        control.bind("<Leave>", _on_leave)
+        control.bind("<Button-1>", _on_click)
+
+        return control
+
+    def _open_calendar_popup(
+        field_kind,
+        field,
+        value_var,
+    ):
+        _close_dropdown_popup("doc_type")
+        _close_dropdown_popup("file_type")
+        _set_dropdown_icon(
+            doc_type_field["toggle"],
+            False,
+        )
+        _set_dropdown_icon(
+            file_type_field["toggle"],
+            False,
+        )
+        _close_calendar_popup()
+
+        initial_date = _resolve_calendar_start_date(
+            value_var.get()
+        )
+
+        calendar_popup_state["field_kind"] = (
+            field_kind
+        )
+        calendar_popup_state["display_year"] = (
+            initial_date.year
+        )
+        calendar_popup_state["display_month"] = (
+            initial_date.month
+        )
+
+        popup_width = 286
+        popup_height = 326
+
+        popup_x = field["canvas"].winfo_rootx()
+        popup_y = (
+            field["canvas"].winfo_rooty()
+            + field["canvas"].winfo_height()
+            + 2
+        )
+
+        popup = tk.Toplevel(app.root)
+        popup.overrideredirect(True)
+        popup.transient(app.root)
+        popup.configure(bg=colors.SURFACE_ALT)
+        popup.geometry(
+            f"{popup_width}x{popup_height}"
+            f"+{popup_x}+{popup_y}"
+        )
+        popup.lift()
+        popup.focus_force()
+
+        calendar_popup_state["popup"] = popup
+
+        shell_canvas = tk.Canvas(
+            popup,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+        )
+        shell_canvas.pack(fill="both", expand=True)
+
+        _draw_dropdown_shell(
+            shell_canvas,
+            popup_width,
+            popup_height,
+            radius=12,
+            border_width=1,
+        )
+
+        body = tk.Frame(
+            shell_canvas,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+        )
+        shell_canvas.create_window(
+            8,
+            8,
+            anchor="nw",
+            window=body,
+            width=popup_width - 16,
+            height=popup_height - 16,
+        )
+
+        header = tk.Frame(
+            body,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+        )
+        header.pack(
+            fill="x",
+            padx=4,
+            pady=(2, 8),
+        )
+
+        month_title = tk.Label(
+            header,
+            text="",
+            bg=colors.SURFACE_ALT,
+            fg=SF_TEXT_MAIN,
+            font=app._font(12, "bold"),
+            anchor="center",
+        )
+        month_title.pack(
+            side="left",
+            fill="x",
+            expand=True,
+        )
+
+        calendar_grid = tk.Frame(
+            body,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+        )
+        calendar_grid.pack(
+            fill="both",
+            expand=True,
+            padx=4,
+        )
+
+        for column_index in range(7):
+            calendar_grid.grid_columnconfigure(
+                column_index,
+                weight=1,
+                uniform="calendar_day",
+            )
+
+        def _select_calendar_date(day_value):
+            year_value = int(
+                calendar_popup_state[
+                    "display_year"
+                ]
+            )
+            month_value = int(
+                calendar_popup_state[
+                    "display_month"
+                ]
+            )
+
+            value_var.set(
+                f"{year_value:04d}-"
+                f"{month_value:02d}-"
+                f"{int(day_value):02d}"
+            )
+
+            _set_quick_button_state(None)
+            _close_calendar_popup()
+
+        def _draw_calendar_month():
+            for child in calendar_grid.winfo_children():
+                child.destroy()
+
+            year_value = int(
+                calendar_popup_state[
+                    "display_year"
+                ]
+            )
+            month_value = int(
+                calendar_popup_state[
+                    "display_month"
+                ]
+            )
+
+            month_title.configure(
+                text=f"{year_value}년 {month_value}월"
+            )
+
+            for weekday_index, weekday_text in enumerate(
+                SF_CALENDAR_WEEKDAYS
+            ):
+                weekday_label = tk.Label(
+                    calendar_grid,
+                    text=weekday_text,
+                    bg=colors.SURFACE_ALT,
+                    fg=(
+                        SF_STATUS_FAILED
+                        if weekday_index == 6
+                        else SF_TEXT_PLACEHOLDER
+                    ),
+                    font=app._font(9, "bold"),
+                    anchor="center",
+                    pady=5,
+                )
+                weekday_label.grid(
+                    row=0,
+                    column=weekday_index,
+                    sticky="nsew",
+                )
+
+            first_weekday = date(
+                year_value,
+                month_value,
+                1,
+            ).weekday()
+
+            final_day = monthrange(
+                year_value,
+                month_value,
+            )[1]
+
+            today_value = date.today()
+            selected_text = str(
+                value_var.get() or ""
+            ).strip()
+
+            for day_value in range(
+                1,
+                final_day + 1,
+            ):
+                cell_index = (
+                    first_weekday
+                    + day_value
+                    - 1
+                )
+                row_index = (
+                    cell_index // 7
+                ) + 1
+                column_index = cell_index % 7
+
+                iso_value = (
+                    f"{year_value:04d}-"
+                    f"{month_value:02d}-"
+                    f"{day_value:02d}"
+                )
+
+                is_selected = (
+                    selected_text == iso_value
+                )
+
+                is_today = (
+                    today_value.year == year_value
+                    and today_value.month == month_value
+                    and today_value.day == day_value
+                )
+
+                day_label = tk.Label(
+                    calendar_grid,
+                    text=str(day_value),
+                    bg=(
+                        SF_PRIMARY
+                        if is_selected
+                        else colors.SURFACE_ALT
+                    ),
+                    fg=(
+                        colors.TEXT_INVERSE
+                        if is_selected
+                        else (
+                            SF_PRIMARY
+                            if is_today
+                            else (
+                                SF_STATUS_FAILED
+                                if column_index == 6
+                                else SF_TEXT_DARK
+                            )
+                        )
+                    ),
+                    font=app._font(
+                        9,
+                        "bold"
+                        if is_selected or is_today
+                        else "normal",
+                    ),
+                    cursor="hand2",
+                    anchor="center",
+                    padx=4,
+                    pady=6,
+                )
+
+                day_label.grid(
+                    row=row_index,
+                    column=column_index,
+                    sticky="nsew",
+                    padx=1,
+                    pady=1,
+                )
+
+                def _on_day_enter(
+                    _event,
+                    widget=day_label,
+                    selected=is_selected,
+                ):
+                    if not selected:
+                        widget.configure(
+                            bg=SF_SURFACE_HOVER_SOFT
+                        )
+
+                def _on_day_leave(
+                    _event,
+                    widget=day_label,
+                    selected=is_selected,
+                ):
+                    widget.configure(
+                        bg=(
+                            SF_PRIMARY
+                            if selected
+                            else colors.SURFACE_ALT
+                        )
+                    )
+
+                day_label.bind(
+                    "<Enter>",
+                    _on_day_enter,
+                )
+                day_label.bind(
+                    "<Leave>",
+                    _on_day_leave,
+                )
+                day_label.bind(
+                    "<Button-1>",
+                    lambda _event, day=day_value:
+                        _select_calendar_date(day),
+                )
+
+        def _change_calendar_month(direction):
+            current_year = int(
+                calendar_popup_state[
+                    "display_year"
+                ]
+            )
+            current_month = int(
+                calendar_popup_state[
+                    "display_month"
+                ]
+            )
+
+            (
+                shifted_year,
+                shifted_month,
+            ) = _shift_calendar_month(
+                current_year,
+                current_month,
+                direction,
+            )
+
+            calendar_popup_state["display_year"] = (
+                shifted_year
+            )
+            calendar_popup_state["display_month"] = (
+                shifted_month
+            )
+
+            _draw_calendar_month()
+
+        previous_month_control = (
+            _create_calendar_control(
+                header,
+                text="‹",
+                command=lambda:
+                    _change_calendar_month(-1),
+            )
+        )
+        previous_month_control.pack(side="left")
+
+        # Move the title between navigation controls.
+        month_title.pack_forget()
+        month_title.pack(
+            side="left",
+            fill="x",
+            expand=True,
+        )
+
+        next_month_control = (
+            _create_calendar_control(
+                header,
+                text="›",
+                command=lambda:
+                    _change_calendar_month(1),
+            )
+        )
+        next_month_control.pack(side="right")
+
+        footer = tk.Frame(
+            body,
+            bg=colors.SURFACE_ALT,
+            highlightthickness=0,
+            bd=0,
+        )
+        footer.pack(
+            fill="x",
+            padx=4,
+            pady=(8, 2),
+        )
+
+        def _select_today():
+            today_value = date.today()
+
+            value_var.set(today_value.isoformat())
+            _set_quick_button_state(None)
+            _close_calendar_popup()
+
+        today_control = tk.Label(
+            footer,
+            text="오늘",
+            bg=colors.SURFACE_ALT,
+            fg=SF_PRIMARY,
+            font=app._font(9, "bold"),
+            cursor="hand2",
+            padx=8,
+            pady=4,
+        )
+        today_control.pack(side="right")
+
+        today_control.bind(
+            "<Button-1>",
+            lambda _event: _select_today(),
+        )
+
+        popup.bind(
+            "<Escape>",
+            lambda _event: _close_calendar_popup(),
+        )
+
+        _draw_calendar_month()
+
     def _open_dropdown_popup(kind, field, options, value_var):
         popup_key = f"{kind}_popup"
         expanded_key = f"{kind}_expanded"
@@ -713,6 +2035,8 @@ def show_search_files_screen(app):
         filter_content_inner.place(x=0, y=0, width=content_width, height=filter_content_height)
 
     def _toggle_doc_type_dropdown():
+        _close_calendar_popup()
+
         if dropdown_state["doc_type_expanded"]:
             _close_dropdown_popup("doc_type")
         else:
@@ -722,6 +2046,8 @@ def show_search_files_screen(app):
         _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
 
     def _toggle_file_type_dropdown():
+        _close_calendar_popup()
+
         if dropdown_state["file_type_expanded"]:
             _close_dropdown_popup("file_type")
         else:
@@ -732,9 +2058,8 @@ def show_search_files_screen(app):
 
     def _refresh_layout_drawings():
         _draw_card(left_top_card, bottom_shrink=0)
-        _draw_card(left_bottom_card, bottom_shrink=12)
-        _draw_card(right_card, bottom_shrink=12)
         _draw_results_table()
+        _draw_file_details()
         _draw_search_box()
         _layout_filter_row()
         _layout_filter_content()
@@ -785,7 +2110,7 @@ def show_search_files_screen(app):
         filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
 
     search_input = RoundedInput(
-        search_box_holder,
+        search_input_holder,
         textvariable=search_var,
         placeholder=search_placeholder_text,
         width=260,
@@ -806,8 +2131,30 @@ def show_search_files_screen(app):
     search_text_entry = search_input.entry
     search_text_entry.configure(insertbackground=SF_TEXT_DARK)
     search_text_entry.grid_configure(padx=(6, 30))
+    search_text_entry.bind("<Return>", _run_search)
 
-    clear_icon_button = _create_icon_action(search_box_holder, clear_icon_photo, "✕", _clear_search_text)
+    clear_icon_button = _create_icon_action(search_input_holder, clear_icon_photo, "✕", _clear_search_text)
+    search_action_button = (
+        _create_search_action_button(
+            search_box_holder,
+            text="검색",
+            command=_run_search,
+            width=search_button_width,
+            primary=True,
+            icon_photo=search_icon_photo,
+        )
+    )
+
+    reset_action_button = (
+        _create_search_action_button(
+            search_box_holder,
+            text="초기화",
+            command=_reset_search_screen,
+            width=reset_button_width,
+            primary=False,
+        )
+    )
+
     filter_toggle_icon = _create_icon_action(
         filter_row,
         expand_icon_photo,
@@ -833,7 +2180,12 @@ def show_search_files_screen(app):
         date_from_var,
         placeholder="시작일",
         trailing_icon_photo=calendar_icon_photo,
-        trailing_icon_command=lambda: None,
+        trailing_icon_command=lambda:
+            _open_calendar_popup(
+                "date_from",
+                date_from_field,
+                date_from_var,
+            ),
     )
     date_from_field["canvas"].grid(row=0, column=0, sticky="ew")
     _align_rounded_placeholder(date_from_field, left_pad=6, right_pad=30)
@@ -855,7 +2207,12 @@ def show_search_files_screen(app):
         date_to_var,
         placeholder="종료일",
         trailing_icon_photo=calendar_icon_photo,
-        trailing_icon_command=lambda: None,
+        trailing_icon_command=lambda:
+            _open_calendar_popup(
+                "date_to",
+                date_to_field,
+                date_to_var,
+            ),
     )
     date_to_field["canvas"].grid(row=0, column=2, sticky="ew")
     _align_rounded_placeholder(date_to_field, left_pad=6, right_pad=30)
@@ -900,7 +2257,15 @@ def show_search_files_screen(app):
         def on_key_release(_event):
             if str(value_var.get() or "").strip() == "-":
                 return
-            _digits, normalized_text = normalize_date_input(value_var.get())
+
+            _set_quick_button_state(None)
+
+            _digits, normalized_text = (
+                normalize_date_input(
+                    value_var.get()
+                )
+            )
+
             value_var.set(normalized_text)
             entry_widget.icursor(tk.END)
 
@@ -909,6 +2274,19 @@ def show_search_files_screen(app):
 
     _bind_date_entry(date_from_field["entry"], date_from_var)
     _bind_date_entry(date_to_field["entry"], date_to_var)
+
+    for search_entry in (
+        date_from_field["entry"],
+        date_to_field["entry"],
+        doc_type_field["entry"],
+        file_type_field["entry"],
+        uploader_field["entry"],
+    ):
+        search_entry.bind(
+            "<Return>",
+            _run_search,
+            add="+",
+        )
 
     quick_date_state = {"active": None}
     quick_date_buttons = {}
@@ -1010,7 +2388,31 @@ def show_search_files_screen(app):
     _set_dropdown_icon(doc_type_field["toggle"], False)
     _set_dropdown_icon(file_type_field["toggle"], False)
 
-    search_input.pack(fill="both", expand=True)
+    reset_action_button.pack(
+        side="right",
+        fill="y",
+    )
+
+    search_action_button.pack(
+        side="right",
+        fill="y",
+        padx=(
+            search_control_gap,
+            search_control_gap,
+        ),
+    )
+
+    search_input_holder.pack(
+        side="left",
+        fill="both",
+        expand=True,
+    )
+
+    search_input.pack(
+        fill="both",
+        expand=True,
+    )
+
     clear_icon_button.place(relx=1.0, rely=0.5, x=-6, y=0, anchor="e")
 
     filter_label.pack(side="left", padx=(2, 0))
@@ -1037,181 +2439,1930 @@ def show_search_files_screen(app):
             width=1,
         )
 
+    def _format_file_size(file_size):
+        if file_size is None:
+            return "-"
+
+        try:
+            size = float(file_size)
+        except (TypeError, ValueError):
+            return "-"
+
+        units = ("B", "KB", "MB", "GB", "TB")
+        unit_index = 0
+
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024.0
+            unit_index += 1
+
+        if unit_index == 0:
+            return f"{int(size)} {units[unit_index]}"
+
+        if size >= 100:
+            return f"{size:.0f} {units[unit_index]}"
+
+        if size >= 10:
+            return f"{size:.1f} {units[unit_index]}"
+
+        return f"{size:.2f} {units[unit_index]}"
+
+    def _format_archived_at(value):
+        text = str(value or "").strip()
+
+        if not text:
+            return "-"
+
+        if len(text) >= 16:
+            return text[:16]
+
+        return text
+
+    def _format_detail_value(value, fallback="-"):
+        if value is None:
+            return fallback
+
+        if isinstance(value, (list, tuple, set)):
+            values = [
+                str(item).strip()
+                for item in value
+                if str(item or "").strip()
+            ]
+            return ", ".join(values) if values else fallback
+
+        text = str(value).strip()
+        return text or fallback
+
+    def _truncate_canvas_text(
+        canvas,
+        text,
+        max_width,
+        font,
+    ):
+        value = str(text or "")
+
+        if max_width <= 10:
+            return ""
+
+        test_id = canvas.create_text(
+            -10000,
+            -10000,
+            text=value,
+            font=font,
+            anchor="nw",
+        )
+
+        bbox = canvas.bbox(test_id)
+        canvas.delete(test_id)
+
+        if bbox is None or bbox[2] - bbox[0] <= max_width:
+            return value
+
+        suffix = "…"
+        low = 0
+        high = len(value)
+
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = value[:middle] + suffix
+
+            test_id = canvas.create_text(
+                -10000,
+                -10000,
+                text=candidate,
+                font=font,
+                anchor="nw",
+            )
+            bbox = canvas.bbox(test_id)
+            canvas.delete(test_id)
+
+            candidate_width = (
+                bbox[2] - bbox[0]
+                if bbox is not None
+                else 0
+            )
+
+            if candidate_width <= max_width:
+                low = middle
+            else:
+                high = middle - 1
+
+        return value[:low] + suffix
+
+    def _toggle_result_sort(sort_key):
+        allowed_sort_keys = {
+            "original_filename",
+            "document_type",
+            "document_date",
+            "uploaded_by",
+            "archived_at",
+            "file_size",
+            "file_ext",
+        }
+
+        if sort_key not in allowed_sort_keys:
+            return
+
+        current_key = result_sort_state["key"]
+        current_direction = (
+            result_sort_state["direction"]
+        )
+
+        if current_key != sort_key:
+            next_direction = "asc"
+
+        elif current_direction == "asc":
+            next_direction = "desc"
+
+        elif current_direction == "desc":
+            next_direction = None
+
+        else:
+            next_direction = "asc"
+
+        result_sort_state["key"] = (
+            sort_key
+            if next_direction is not None
+            else None
+        )
+        result_sort_state["direction"] = (
+            next_direction
+        )
+
+        sort_succeeded = _request_search_page(
+            0,
+            clear_detail=True,
+        )
+
+        if not sort_succeeded:
+            result_sort_state["key"] = current_key
+            result_sort_state["direction"] = (
+                current_direction
+            )
+
+            _draw_results_table()
+            _draw_file_details()
+
+    def _get_page_count():
+        total_count = int(
+            search_state["total_count"] or 0
+        )
+
+        rows_per_page = max(
+            1,
+            int(result_table_state["rows_per_page"]),
+        )
+
+        if total_count == 0:
+            return 1
+
+        return (
+            total_count + rows_per_page - 1
+        ) // rows_per_page
+
+    def _clamp_result_page():
+        page_count = _get_page_count()
+        current_page = int(
+            result_table_state["page_index"]
+        )
+
+        result_table_state["page_index"] = max(
+            0,
+            min(current_page, page_count - 1),
+        )
+
+    def _get_visible_page_indexes():
+        page_count = _get_page_count()
+
+        if page_count <= SF_VISIBLE_PAGE_BUTTONS:
+            return list(range(page_count))
+
+        current_page = int(
+            result_table_state["page_index"]
+        )
+
+        half_window = (
+            SF_VISIBLE_PAGE_BUTTONS // 2
+        )
+
+        window_start = current_page - half_window
+        window_end = (
+            window_start
+            + SF_VISIBLE_PAGE_BUTTONS
+        )
+
+        if window_start < 0:
+            window_start = 0
+            window_end = SF_VISIBLE_PAGE_BUTTONS
+
+        if window_end > page_count:
+            window_end = page_count
+            window_start = (
+                page_count
+                - SF_VISIBLE_PAGE_BUTTONS
+            )
+
+        return list(
+            range(window_start, window_end)
+        )
+
+    def _change_result_page(direction):
+        if search_state["is_loading_page"]:
+            return
+
+        page_count = _get_page_count()
+        current_page = int(
+            result_table_state["page_index"]
+        )
+        next_page = max(
+            0,
+            min(
+                current_page + int(direction),
+                page_count - 1,
+            ),
+        )
+
+        if next_page == current_page:
+            return
+
+        _request_search_page(
+            next_page,
+            clear_detail=True,
+        )
+
+    def _go_to_result_page(page_index):
+        if search_state["is_loading_page"]:
+            return
+
+        page_count = _get_page_count()
+
+        normalized_page_index = max(
+            0,
+            min(
+                int(page_index),
+                page_count - 1,
+            ),
+        )
+
+        if (
+            normalized_page_index
+            == result_table_state["page_index"]
+        ):
+            return
+
+        _request_search_page(
+            normalized_page_index,
+            clear_detail=True,
+        )
+
+    def _go_to_first_result_page():
+        _go_to_result_page(0)
+
+    def _go_to_last_result_page():
+        _go_to_result_page(
+            _get_page_count() - 1
+        )
+
+    def _get_selected_result():
+        selected_file_id = search_state["selected_file_id"]
+
+        if selected_file_id is None:
+            return None
+
+        for result in search_state["results"]:
+            if int(result["file_id"]) == int(selected_file_id):
+                return result
+
+        return None
+
+    def _get_selected_result_index():
+        selected_file_id = search_state[
+            "selected_file_id"
+        ]
+
+        if selected_file_id is None:
+            return None
+
+        for index, result in enumerate(
+            search_state["results"]
+        ):
+            if (
+                int(result["file_id"])
+                == int(selected_file_id)
+            ):
+                return index
+
+        return None
+
+    def _select_result_row(file_id):
+        left_bottom_card.focus_set()
+
+        search_state["selected_file_id"] = int(
+            file_id
+        )
+
+        _draw_results_table()
+        _draw_file_details()
+
+    def _select_result_by_index(result_index):
+        results = search_state["results"]
+
+        if not results:
+            return
+
+        normalized_index = max(
+            0,
+            min(
+                int(result_index),
+                len(results) - 1,
+            ),
+        )
+
+        selected_result = results[
+            normalized_index
+        ]
+
+        search_state["selected_file_id"] = int(
+            selected_result["file_id"]
+        )
+
+        _draw_results_table()
+        _draw_file_details()
+
+    def _move_result_selection(direction):
+        results = search_state["results"]
+
+        if not results:
+            return "break"
+
+        selected_index = (
+            _get_selected_result_index()
+        )
+
+        if selected_index is None:
+            target_index = (
+                0
+                if int(direction) >= 0
+                else len(results) - 1
+            )
+
+        else:
+            target_index = (
+                selected_index + int(direction)
+            )
+
+        if target_index < 0:
+            current_page = int(
+                result_table_state["page_index"]
+            )
+
+            if current_page > 0:
+                loaded = _request_search_page(
+                    current_page - 1,
+                    clear_detail=True,
+                    redraw=False,
+                )
+
+                if loaded and search_state["results"]:
+                    _select_result_by_index(
+                        len(search_state["results"]) - 1
+                    )
+
+                if not loaded:
+                    _draw_results_table()
+                    _draw_file_details()
+
+            return "break"
+
+        if target_index >= len(results):
+            current_page = int(
+                result_table_state["page_index"]
+            )
+
+            if current_page < _get_page_count() - 1:
+                loaded = _request_search_page(
+                    current_page + 1,
+                    clear_detail=True,
+                    redraw=False,
+                )
+
+                if loaded and search_state["results"]:
+                    _select_result_by_index(0)
+
+                if not loaded:
+                    _draw_results_table()
+                    _draw_file_details()
+
+            return "break"
+
+        _select_result_by_index(target_index)
+        return "break"
+
+    def _move_result_page(direction):
+        current_page = int(
+            result_table_state["page_index"]
+        )
+
+        target_page = max(
+            0,
+            min(
+                current_page + int(direction),
+                _get_page_count() - 1,
+            ),
+        )
+
+        if target_page == current_page:
+            return "break"
+
+        selected_index = (
+            _get_selected_result_index()
+        )
+        if selected_index is None:
+            selected_index = 0
+
+        loaded = _request_search_page(
+            target_page,
+            clear_detail=True,
+            redraw=False,
+        )
+
+        if not loaded:
+            _draw_results_table()
+            _draw_file_details()
+            return "break"
+
+        if search_state["results"]:
+            _select_result_by_index(
+                min(
+                    selected_index,
+                    len(search_state["results"]) - 1,
+                )
+            )
+
+        return "break"
+
+    def _select_first_result(_event=None):
+        if search_state["total_count"]:
+            loaded = _request_search_page(
+                0,
+                clear_detail=True,
+                redraw=False,
+            )
+
+            if loaded and search_state["results"]:
+                _select_result_by_index(0)
+            elif not loaded:
+                _draw_results_table()
+                _draw_file_details()
+
+        return "break"
+
+    def _select_last_result(_event=None):
+        if search_state["total_count"]:
+            last_page = _get_page_count() - 1
+
+            loaded = _request_search_page(
+                last_page,
+                clear_detail=True,
+                redraw=False,
+            )
+
+            if loaded and search_state["results"]:
+                _select_result_by_index(
+                    len(search_state["results"]) - 1
+                )
+            elif not loaded:
+                _draw_results_table()
+                _draw_file_details()
+
+        return "break"
+
+    def _toggle_keyboard_selected_result(
+        _event=None,
+    ):
+        selected_file_id = search_state[
+            "selected_file_id"
+        ]
+
+        if selected_file_id is not None:
+            _toggle_result_checkbox(
+                selected_file_id
+            )
+
+        return "break"
+
+    def _clear_detail_selection(_event=None):
+        search_state["selected_file_id"] = None
+
+        _draw_results_table()
+        _draw_file_details()
+
+        return "break"
+
+    def _toggle_result_checkbox(file_id):
+        left_bottom_card.focus_set()
+
+        normalized_file_id = int(file_id)
+        selected_ids = search_state["selected_file_ids"]
+
+        if normalized_file_id in selected_ids:
+            selected_ids.remove(normalized_file_id)
+        else:
+            selected_ids.add(normalized_file_id)
+
+        _draw_results_table()
+
+    def _get_current_page_file_ids():
+        return {
+            int(result["file_id"])
+            for result in search_state["results"]
+        }
+
+    def _clear_result_selection():
+        search_state["selected_file_ids"].clear()
+
+        result_table_state["select_all_checked"] = False
+
+        _draw_results_table()
+
+    def _select_current_result_page():
+        page_file_ids = _get_current_page_file_ids()
+
+        search_state["selected_file_ids"].update(
+            page_file_ids
+        )
+
+        _draw_results_table()
+
+    def _draw_pagination_button(
+        canvas,
+        *,
+        center_x,
+        center_y,
+        width,
+        height,
+        tag,
+        text=None,
+        icon=None,
+        active=False,
+        enabled=True,
+        command=None,
+    ):
+        x1 = center_x - (width / 2.0)
+        y1 = center_y - (height / 2.0)
+        x2 = center_x + (width / 2.0)
+        y2 = center_y + (height / 2.0)
+
+        fill_color = (
+            SF_PRIMARY
+            if active
+            else colors.SURFACE_ALT
+        )
+
+        border_color = (
+            SF_PRIMARY
+            if active
+            else (
+                SF_BORDER
+                if enabled
+                else colors.SURFACE_ALT
+            )
+        )
+
+        text_color = (
+            colors.TEXT_INVERSE
+            if active
+            else (
+                SF_TEXT_DARK
+                if enabled
+                else SF_TEXT_PLACEHOLDER
+            )
+        )
+
+        _draw_plain_rounded_rect(
+            canvas,
+            x1,
+            y1,
+            x2,
+            y2,
+            8,
+            fill=fill_color,
+            outline=border_color,
+            border_width=1,
+        )
+
+        if icon is not None:
+            canvas.create_image(
+                center_x,
+                center_y,
+                image=icon,
+                anchor="center",
+                tags=(tag,),
+            )
+
+        elif text is not None:
+            canvas.create_text(
+                center_x,
+                center_y,
+                text=text,
+                fill=text_color,
+                font=app._font(9, "bold"),
+                anchor="center",
+                tags=(tag,),
+            )
+
+        canvas.create_rectangle(
+            x1,
+            y1,
+            x2,
+            y2,
+            fill="",
+            outline="",
+            tags=(tag,),
+        )
+
+        if enabled and callable(command):
+            canvas.tag_bind(
+                tag,
+                "<Button-1>",
+                lambda _event: command(),
+            )
+
+    def _draw_selection_toolbar_button(
+        canvas,
+        *,
+        x,
+        center_y,
+        text,
+        tag,
+        command,
+    ):
+        text_font = app._font(9, "bold")
+
+        text_id = canvas.create_text(
+            -10000,
+            -10000,
+            text=text,
+            font=text_font,
+            anchor="nw",
+        )
+        bbox = canvas.bbox(text_id)
+        canvas.delete(text_id)
+
+        text_width = (
+            bbox[2] - bbox[0]
+            if bbox is not None
+            else 60
+        )
+
+        button_width = text_width + 24
+        button_height = 28
+
+        x1 = x
+        y1 = center_y - button_height / 2.0
+        x2 = x1 + button_width
+        y2 = center_y + button_height / 2.0
+
+        _draw_plain_rounded_rect(
+            canvas,
+            x1,
+            y1,
+            x2,
+            y2,
+            8,
+            fill=colors.SURFACE_ALT,
+            outline=SF_BORDER,
+            border_width=1,
+        )
+
+        canvas.create_text(
+            (x1 + x2) / 2.0,
+            center_y,
+            text=text,
+            fill=SF_TEXT_DARK,
+            font=text_font,
+            anchor="center",
+            tags=(tag,),
+        )
+
+        canvas.create_rectangle(
+            x1,
+            y1,
+            x2,
+            y2,
+            fill="",
+            outline="",
+            tags=(tag,),
+        )
+
+        canvas.tag_bind(
+            tag,
+            "<Button-1>",
+            lambda _event: command(),
+        )
+        canvas.tag_bind(
+            tag,
+            "<Enter>",
+            lambda _event:
+                canvas.configure(cursor="hand2"),
+        )
+        canvas.tag_bind(
+            tag,
+            "<Leave>",
+            lambda _event:
+                canvas.configure(cursor=""),
+        )
+
+        return x2
+
     def _draw_results_table():
         card_canvas = left_bottom_card
-        card_width = max(100, card_canvas.winfo_width())
-        full_height = max(100, card_canvas.winfo_height())
-        card_height = max(100, full_height - 12)
-        card_x1 = 1 + left_cards_left_inset
-        card_x2 = max(card_x1 + 40, card_width - 1 - left_cards_right_inset)
+        card_canvas.delete("all")
 
-        row_weights = [10.0, 7.5, 72.5, 10.0]
-        row_colors = [colors.SURFACE_ALT, colors.SURFACE_ACCENT_SOFT, colors.SURFACE_ALT, colors.SURFACE_ALT]
+        card_width = max(
+            100,
+            card_canvas.winfo_width(),
+        )
+        full_height = max(
+            100,
+            card_canvas.winfo_height(),
+        )
+        card_height = max(
+            100,
+            full_height - 12,
+        )
+
+        card_x1 = 1 + left_cards_left_inset
+        card_x2 = max(
+            card_x1 + 40,
+            card_width - 1 - left_cards_right_inset,
+        )
+
+        app._smooth_rounded_rect(
+            card_canvas,
+            card_x1,
+            1,
+            card_x2,
+            card_height - 1,
+            24,
+            fill=colors.SURFACE_ALT,
+            outline=SF_BORDER,
+            width=1,
+        )
 
         inner_padding = 8
-        inner_x1, inner_y1 = card_x1 + inner_padding, inner_padding
-        inner_x2, inner_y2 = card_x2 - inner_padding, card_height - inner_padding
+        inner_x1 = card_x1 + inner_padding
+        inner_y1 = inner_padding
+        inner_x2 = card_x2 - inner_padding
+        inner_y2 = card_height - inner_padding
         inner_height = max(1, inner_y2 - inner_y1)
 
-        collapsed_top_height, _expanded_top_height, available_height = _compute_left_top_targets()
-        baseline_bottom_height = max(1, int(available_height - collapsed_top_height))
-        baseline_card_height = max(1, baseline_bottom_height - 12)
-        baseline_inner_height = max(1, baseline_card_height - (inner_padding * 2))
+        title_height = 48
+        header_height = 36
+        footer_height = 46
 
-        fixed_row1 = max(1, int(baseline_inner_height * (row_weights[0] / 100.0)))
-        fixed_row2 = max(1, int(baseline_inner_height * (row_weights[1] / 100.0)))
-        fixed_row4 = max(1, int(baseline_inner_height * (row_weights[3] / 100.0)))
-        fixed_total = fixed_row1 + fixed_row2 + fixed_row4
-        row3_height = max(1, inner_height - fixed_total)
+        body_top = inner_y1 + title_height + header_height
+        body_bottom = inner_y2 - footer_height
+        body_height = max(1, body_bottom - body_top)
 
-        row_heights = [fixed_row1, fixed_row2, row3_height, fixed_row4]
+        card_canvas.create_rectangle(
+            inner_x1,
+            inner_y1,
+            inner_x2,
+            inner_y1 + title_height,
+            fill=colors.SURFACE_ALT,
+            outline="",
+        )
+        card_canvas.create_rectangle(
+            inner_x1,
+            inner_y1 + title_height,
+            inner_x2,
+            body_top,
+            fill=colors.SURFACE_ACCENT_SOFT,
+            outline="",
+        )
+        card_canvas.create_rectangle(
+            inner_x1,
+            body_top,
+            inner_x2,
+            body_bottom,
+            fill=colors.SURFACE_ALT,
+            outline="",
+        )
+        card_canvas.create_rectangle(
+            inner_x1,
+            body_bottom,
+            inner_x2,
+            inner_y2,
+            fill=colors.SURFACE_ALT,
+            outline="",
+        )
 
-        y_cursor = inner_y1
-        divider_y = []
-        for idx, row_height in enumerate(row_heights):
-            y_next = y_cursor + row_height
-            card_canvas.create_rectangle(
+        for divider_y in (
+            inner_y1 + title_height,
+            body_top,
+            body_bottom,
+        ):
+            card_canvas.create_line(
                 inner_x1,
-                y_cursor,
+                divider_y,
                 inner_x2,
-                y_next,
-                fill=row_colors[idx],
-                outline="",
+                divider_y,
+                fill=SF_BORDER,
+                width=1,
             )
-            if idx < len(row_heights) - 1:
-                divider_y.append(y_next)
-            y_cursor = y_next
 
-        for y in divider_y:
-            card_canvas.create_line(inner_x1, y, inner_x2, y, fill=SF_BORDER, width=1)
+        title_center_y = (
+            inner_y1 + title_height / 2.0
+        )
 
-        row1_top = inner_y1
-        row1_bottom = row1_top + row_heights[0]
-        row1_center_y = (row1_top + row1_bottom) // 2
+        selected_count = len(
+            search_state["selected_file_ids"]
+        )
+
+        title_text = search_result_count_var.get()
+
+        if selected_count:
+            title_text += f" · {selected_count}개 선택"
+
         card_canvas.create_text(
             inner_x1 + 10,
-            row1_center_y,
-            text=search_result_count_var.get(),
+            title_center_y,
+            text=title_text,
             fill=SF_TEXT_MAIN,
             font=app._font(14, "bold"),
             anchor="w",
         )
 
-        table_col_widths_pct = [5.0, 25.0, 10.0, 15.0, 10.0, 15.0, 5.0, 10.0, 5.0]
-        row2_headers = [
-            "",
-            "문서명",
-            "문서 유형",
-            "문서 날짜",
-            "업로더",
-            "업로드 날짜",
-            "크기",
-            "파일 종류",
-            "",
+        if search_state["is_loading_page"]:
+            card_canvas.create_text(
+                inner_x2 - 12,
+                title_center_y,
+                text="불러오는 중…",
+                fill=SF_STATUS_PROCESSING,
+                font=app._font(9, "bold"),
+                anchor="e",
+            )
+
+        available_toolbar_width = (
+            inner_x2 - inner_x1
+        )
+
+        if selected_count and available_toolbar_width >= 620:
+            toolbar_gap = 6
+            toolbar_right = inner_x2 - 10
+
+            toolbar_specs = [
+                (
+                    "선택 해제",
+                    "sf_clear_selection",
+                    _clear_result_selection,
+                ),
+            ]
+
+            page_file_ids_for_toolbar = (
+                _get_current_page_file_ids()
+            )
+
+            if (
+                page_file_ids_for_toolbar
+                and not page_file_ids_for_toolbar.issubset(
+                    search_state["selected_file_ids"]
+                )
+            ):
+                toolbar_specs.insert(
+                    0,
+                    (
+                        "현재 페이지 선택",
+                        "sf_select_page",
+                        _select_current_result_page,
+                    ),
+                )
+
+            button_measurements = []
+
+            for text, tag, command in toolbar_specs:
+                measure_id = card_canvas.create_text(
+                    -10000,
+                    -10000,
+                    text=text,
+                    font=app._font(9, "bold"),
+                    anchor="nw",
+                )
+                bbox = card_canvas.bbox(measure_id)
+                card_canvas.delete(measure_id)
+
+                text_width = (
+                    bbox[2] - bbox[0]
+                    if bbox is not None
+                    else 60
+                )
+
+                button_measurements.append(
+                    text_width + 24
+                )
+
+            toolbar_width = sum(button_measurements)
+            toolbar_width += toolbar_gap * max(
+                0,
+                len(toolbar_specs) - 1,
+            )
+
+            toolbar_x = toolbar_right - toolbar_width
+
+            for text, tag, command in toolbar_specs:
+                toolbar_x = _draw_selection_toolbar_button(
+                    card_canvas,
+                    x=toolbar_x,
+                    center_y=title_center_y,
+                    text=text,
+                    tag=tag,
+                    command=command,
+                )
+                toolbar_x += toolbar_gap
+
+        table_col_widths_pct = [
+            5.0,
+            25.0,
+            10.0,
+            15.0,
+            10.0,
+            15.0,
+            5.0,
+            10.0,
+            5.0,
+        ]
+        header_definitions = [
+            {
+                "text": "",
+                "sort_key": None,
+            },
+            {
+                "text": "문서명",
+                "sort_key": "original_filename",
+            },
+            {
+                "text": "문서 유형",
+                "sort_key": "document_type",
+            },
+            {
+                "text": "문서 날짜",
+                "sort_key": "document_date",
+            },
+            {
+                "text": "업로더",
+                "sort_key": "uploaded_by",
+            },
+            {
+                "text": "업로드 날짜",
+                "sort_key": "archived_at",
+            },
+            {
+                "text": "크기",
+                "sort_key": "file_size",
+            },
+            {
+                "text": "파일 종류",
+                "sort_key": "file_ext",
+            },
+            {
+                "text": "",
+                "sort_key": None,
+            },
         ]
 
-        row2_top = row1_bottom
-        row2_bottom = row2_top + row_heights[1]
-        row2_center_y = (row2_top + row2_bottom) // 2
-        row2_inner_x1 = inner_x1 + 2
-        row2_inner_x2 = inner_x2 - 2
-        row2_inner_width = max(1, row2_inner_x2 - row2_inner_x1)
+        table_x1 = inner_x1 + 2
+        table_x2 = inner_x2 - 2
+        table_width = max(1, table_x2 - table_x1)
 
-        col_width_px = [int(row2_inner_width * (pct / 100.0)) for pct in table_col_widths_pct]
-        col_width_px[-1] += max(0, row2_inner_width - sum(col_width_px))
+        column_widths = [
+            int(table_width * (pct / 100.0))
+            for pct in table_col_widths_pct
+        ]
+        column_widths[-1] += (
+            table_width - sum(column_widths)
+        )
 
-        col_starts = []
-        cursor_px = row2_inner_x1
-        for width_px in col_width_px:
-            col_starts.append(cursor_px)
-            cursor_px += width_px
+        column_starts = []
+        column_centers = []
 
-        col_centers = []
-        x_cursor = row2_inner_x1
-        for width_px in col_width_px:
-            col_centers.append(x_cursor + (width_px / 2.0))
-            x_cursor += width_px
+        x_cursor = table_x1
+        for column_width in column_widths:
+            column_starts.append(x_cursor)
+            column_centers.append(
+                x_cursor + (column_width / 2.0)
+            )
+            x_cursor += column_width
 
-        select_tag = "sf_result_select_all"
+        header_center_y = (
+            inner_y1
+            + title_height
+            + (header_height / 2.0)
+        )
+
+        for column_index, definition in enumerate(
+            header_definitions
+        ):
+            header_text = definition["text"]
+            sort_key = definition["sort_key"]
+
+            if not header_text:
+                continue
+
+            displayed_header = header_text
+
+            if result_sort_state["key"] == sort_key:
+                if result_sort_state["direction"] == "asc":
+                    displayed_header += " ▲"
+                elif result_sort_state["direction"] == "desc":
+                    displayed_header += " ▼"
+
+            header_tag = (
+                f"sf_result_header_{column_index}"
+            )
+
+            card_canvas.create_text(
+                column_centers[column_index],
+                header_center_y,
+                text=displayed_header,
+                fill=(
+                    SF_PRIMARY
+                    if result_sort_state["key"] == sort_key
+                    else SF_TEXT_DARK
+                ),
+                font=app._font(
+                    10,
+                    "bold"
+                    if result_sort_state["key"] == sort_key
+                    else "normal",
+                ),
+                anchor="center",
+                tags=(header_tag,),
+            )
+
+            if sort_key is not None:
+                card_canvas.create_rectangle(
+                    column_starts[column_index],
+                    inner_y1 + title_height,
+                    column_starts[column_index]
+                    + column_widths[column_index],
+                    body_top,
+                    fill="",
+                    outline="",
+                    tags=(header_tag,),
+                )
+
+                card_canvas.tag_bind(
+                    header_tag,
+                    "<Button-1>",
+                    lambda _event, key=sort_key:
+                        _toggle_result_sort(key),
+                )
+                card_canvas.tag_bind(
+                    header_tag,
+                    "<Enter>",
+                    lambda _event:
+                        card_canvas.configure(cursor="hand2"),
+                )
+                card_canvas.tag_bind(
+                    header_tag,
+                    "<Leave>",
+                    lambda _event:
+                        card_canvas.configure(cursor=""),
+                )
+
+        results = search_state["results"]
+
+        rows_per_page = SF_RESULTS_PER_PAGE
+        result_table_state["rows_per_page"] = (
+            rows_per_page
+        )
+
+        _clamp_result_page()
+
+        page_index = int(
+            result_table_state["page_index"]
+        )
+        page_loading = search_state[
+            "is_loading_page"
+        ]
+        page_results = results
+
+        row_boundaries = [
+            body_top
+            + round(
+                body_height * row_index
+                / rows_per_page
+            )
+            for row_index in range(
+                rows_per_page + 1
+            )
+        ]
+
+        page_file_ids = {
+            int(result["file_id"])
+            for result in page_results
+        }
+
+        selected_ids = search_state["selected_file_ids"]
+
+        all_page_selected = (
+            bool(page_file_ids)
+            and page_file_ids.issubset(selected_ids)
+        )
+        result_table_state["select_all_checked"] = (
+            all_page_selected
+        )
+
         unchecked_icon = result_table_icons.get("unchecked")
         checked_icon = result_table_icons.get("checked")
 
-        def _update_select_all_icon():
-            icon_checked = bool(result_table_state.get("select_all_checked", False))
-            if select_icon_id is not None:
-                next_icon = checked_icon if icon_checked else unchecked_icon
-                if next_icon is not None:
-                    card_canvas.itemconfigure(select_icon_id, image=next_icon)
-            elif select_text_id is not None:
-                card_canvas.itemconfigure(select_text_id, text="☑" if icon_checked else "□")
+        select_all_tag = "sf_result_select_all"
+        select_all_icon = (
+            checked_icon
+            if all_page_selected
+            else unchecked_icon
+        )
 
-        def _toggle_select_all(_event=None):
-            result_table_state["select_all_checked"] = not bool(result_table_state.get("select_all_checked", False))
-            _update_select_all_icon()
-            return "break"
-
-        select_icon_id = None
-        select_text_id = None
-        if unchecked_icon is not None:
-            select_icon_id = card_canvas.create_image(
-                col_centers[0],
-                row2_center_y,
-                image=unchecked_icon,
+        if select_all_icon is not None:
+            card_canvas.create_image(
+                column_centers[0],
+                header_center_y,
+                image=select_all_icon,
                 anchor="center",
-                tags=(select_tag,),
+                tags=(select_all_tag,),
             )
         else:
-            select_text_id = card_canvas.create_text(
-                col_centers[0],
-                row2_center_y,
-                text="□",
+            card_canvas.create_text(
+                column_centers[0],
+                header_center_y,
+                text="☑" if all_page_selected else "□",
                 fill=SF_TEXT_DARK,
                 font=app._font(12, "bold"),
                 anchor="center",
-                tags=(select_tag,),
+                tags=(select_all_tag,),
             )
 
-        col1_x1 = row2_inner_x1
-        col1_x2 = row2_inner_x1 + col_width_px[0]
         card_canvas.create_rectangle(
-            col1_x1,
-            row2_top,
-            col1_x2,
-            row2_bottom,
+            column_starts[0],
+            inner_y1 + title_height,
+            column_starts[0] + column_widths[0],
+            body_top,
             fill="",
             outline="",
-            tags=(select_tag,),
+            tags=(select_all_tag,),
         )
 
-        card_canvas.tag_bind(select_tag, "<Button-1>", _toggle_select_all)
-        _update_select_all_icon()
+        def _toggle_select_all(_event=None):
+            if not page_file_ids:
+                return "break"
 
-        for idx, header_text in enumerate(row2_headers):
-            if idx == 0 or not header_text:
-                continue
+            if page_file_ids.issubset(selected_ids):
+                selected_ids.difference_update(page_file_ids)
+            else:
+                selected_ids.update(page_file_ids)
+
+            _draw_results_table()
+            return "break"
+
+        card_canvas.tag_bind(
+            select_all_tag,
+            "<Button-1>",
+            _toggle_select_all,
+        )
+
+        if search_state["error"]:
             card_canvas.create_text(
-                col_centers[idx],
-                row2_center_y,
-                text=header_text,
-                fill=SF_TEXT_DARK,
-                font=app._font(10),
+                (inner_x1 + inner_x2) / 2.0,
+                (body_top + body_bottom) / 2.0,
+                text=search_state["error"],
+                fill=SF_STATUS_FAILED,
+                font=app._font(11),
+                width=max(
+                    100,
+                    inner_x2 - inner_x1 - 80,
+                ),
+                justify="center",
                 anchor="center",
             )
 
-        row3_top = row2_bottom
-        row3_bottom = row3_top + row_heights[2]
-        row3_center_y = (row3_top + row3_bottom) // 2
-        card_canvas.create_text(
-            (inner_x1 + inner_x2) / 2.0,
-            row3_center_y,
-            text="검색 결과 데이터가 여기에 표시돼요.",
+        elif not search_state["has_searched"]:
+            card_canvas.create_text(
+                (inner_x1 + inner_x2) / 2.0,
+                (body_top + body_bottom) / 2.0,
+                text=(
+                    "검색어나 상세 조건을 입력한 뒤\n"
+                    "검색 버튼을 눌러 주세요."
+                ),
+                fill=SF_TEXT_PLACEHOLDER,
+                font=app._font(11),
+                justify="center",
+                anchor="center",
+            )
+
+        elif not results:
+            card_canvas.create_text(
+                (inner_x1 + inner_x2) / 2.0,
+                (body_top + body_bottom) / 2.0,
+                text=(
+                    "조건에 맞는 파일이 없어요.\n"
+                    "검색어나 필터를 변경해 보세요."
+                ),
+                fill=SF_TEXT_PLACEHOLDER,
+                font=app._font(11),
+                justify="center",
+                anchor="center",
+            )
+
+        else:
+            row_font = app._font(9)
+            filename_font = app._font(9, "bold")
+
+            for local_index, result in enumerate(page_results):
+                row_top = row_boundaries[
+                    local_index
+                ]
+                row_bottom = row_boundaries[
+                    local_index + 1
+                ]
+                row_center = (
+                    row_top + row_bottom
+                ) / 2.0
+
+                file_id = int(result["file_id"])
+                is_selected_row = (
+                    search_state["selected_file_id"]
+                    == file_id
+                )
+                is_checked = file_id in selected_ids
+                is_hovered = (
+                    result_table_state[
+                        "hovered_file_id"
+                    ]
+                    == file_id
+                )
+
+                if is_selected_row:
+                    row_fill = (
+                        colors.SURFACE_ACCENT_SOFT
+                    )
+                elif is_hovered:
+                    row_fill = SF_SURFACE_HOVER_SOFT
+                else:
+                    row_fill = colors.SURFACE_ALT
+
+                row_tag = f"sf_result_row_{file_id}"
+                row_background_tag = (
+                    f"sf_result_row_background_{file_id}"
+                )
+                check_tag = f"sf_result_check_{file_id}"
+
+                card_canvas.create_rectangle(
+                    table_x1,
+                    row_top,
+                    table_x2,
+                    row_bottom,
+                    fill=row_fill,
+                    outline="",
+                    tags=(
+                        row_tag,
+                        row_background_tag,
+                    ),
+                )
+
+                checkbox_icon = (
+                    checked_icon
+                    if is_checked
+                    else unchecked_icon
+                )
+
+                if checkbox_icon is not None:
+                    card_canvas.create_image(
+                        column_centers[0],
+                        row_center,
+                        image=checkbox_icon,
+                        anchor="center",
+                        tags=(check_tag,),
+                    )
+                else:
+                    card_canvas.create_text(
+                        column_centers[0],
+                        row_center,
+                        text="☑" if is_checked else "□",
+                        fill=SF_TEXT_DARK,
+                        font=app._font(12, "bold"),
+                        anchor="center",
+                        tags=(check_tag,),
+                    )
+
+                card_canvas.create_rectangle(
+                    column_starts[0],
+                    row_top,
+                    column_starts[0] + column_widths[0],
+                    row_bottom,
+                    fill="",
+                    outline="",
+                    tags=(check_tag,),
+                )
+
+                filename = _truncate_canvas_text(
+                    card_canvas,
+                    result.get("original_filename", ""),
+                    column_widths[1] - 14,
+                    filename_font,
+                )
+
+                document_type = _truncate_canvas_text(
+                    card_canvas,
+                    result.get("document_type", ""),
+                    column_widths[2] - 10,
+                    row_font,
+                )
+
+                uploaded_by = _truncate_canvas_text(
+                    card_canvas,
+                    result.get("uploaded_by", ""),
+                    column_widths[4] - 10,
+                    row_font,
+                )
+
+                row_values = [
+                    None,
+                    filename,
+                    document_type,
+                    result.get("document_date") or "-",
+                    uploaded_by,
+                    _format_archived_at(
+                        result.get("archived_at")
+                    ),
+                    _format_file_size(
+                        result.get("file_size")
+                    ),
+                    result.get("file_ext") or "-",
+                    "",
+                ]
+
+                for column_index, value in enumerate(row_values):
+                    if column_index == 0 or value is None:
+                        continue
+
+                    anchor = (
+                        "w"
+                        if column_index == 1
+                        else "center"
+                    )
+                    text_x = (
+                        column_starts[column_index] + 7
+                        if column_index == 1
+                        else column_centers[column_index]
+                    )
+
+                    card_canvas.create_text(
+                        text_x,
+                        row_center,
+                        text=value,
+                        fill=SF_TEXT_DARK,
+                        font=(
+                            filename_font
+                            if column_index == 1
+                            else row_font
+                        ),
+                        anchor=anchor,
+                        tags=(row_tag,),
+                    )
+
+                card_canvas.tag_bind(
+                    row_tag,
+                    "<Button-1>",
+                    lambda _event, fid=file_id:
+                        _select_result_row(fid),
+                )
+                def _on_row_enter(
+                    _event,
+                    hovered_id=file_id,
+                    background_tag=row_background_tag,
+                ):
+                    result_table_state[
+                        "hovered_file_id"
+                    ] = hovered_id
+
+                    card_canvas.configure(cursor="hand2")
+
+                    if (
+                        search_state["selected_file_id"]
+                        != hovered_id
+                    ):
+                        card_canvas.itemconfigure(
+                            background_tag,
+                            fill=SF_SURFACE_HOVER_SOFT,
+                        )
+
+                def _on_row_leave(
+                    _event,
+                    hovered_id=file_id,
+                    background_tag=row_background_tag,
+                ):
+                    if (
+                        result_table_state[
+                            "hovered_file_id"
+                        ]
+                        == hovered_id
+                    ):
+                        result_table_state[
+                            "hovered_file_id"
+                        ] = None
+
+                    card_canvas.configure(cursor="")
+
+                    if (
+                        search_state["selected_file_id"]
+                        != hovered_id
+                    ):
+                        card_canvas.itemconfigure(
+                            background_tag,
+                            fill=colors.SURFACE_ALT,
+                        )
+
+                card_canvas.tag_bind(
+                    row_tag,
+                    "<Enter>",
+                    _on_row_enter,
+                )
+                card_canvas.tag_bind(
+                    row_tag,
+                    "<Leave>",
+                    _on_row_leave,
+                )
+                card_canvas.tag_bind(
+                    check_tag,
+                    "<Button-1>",
+                    lambda _event, fid=file_id:
+                        _toggle_result_checkbox(fid),
+                )
+
+        # Draw row separators after row backgrounds so that
+        # populated rows cannot cover the table grid.
+        for slot_index in range(rows_per_page):
+            slot_bottom = row_boundaries[
+                slot_index + 1
+            ]
+
+            card_canvas.create_line(
+                table_x1,
+                slot_bottom,
+                table_x2,
+                slot_bottom,
+                fill=SF_BORDER,
+                width=1,
+            )
+
+        if results and not search_state["error"]:
+            page_count = _get_page_count()
+            current_page = int(
+                result_table_state["page_index"]
+            )
+
+            footer_center_y = (
+                body_bottom + inner_y2
+            ) / 2.0
+
+            visible_page_indexes = (
+                _get_visible_page_indexes()
+            )
+
+            show_navigation_icons = (
+                page_count
+                > SF_VISIBLE_PAGE_BUTTONS
+            )
+
+            page_button_width = 30
+            page_button_height = 28
+            icon_button_width = 30
+            button_gap = 6
+
+            control_specs = []
+
+            if show_navigation_icons:
+                control_specs.extend(
+                    [
+                        {
+                            "kind": "far_before",
+                            "width": icon_button_width,
+                        },
+                        {
+                            "kind": "before",
+                            "width": icon_button_width,
+                        },
+                    ]
+                )
+
+            for visible_page_index in visible_page_indexes:
+                control_specs.append(
+                    {
+                        "kind": "page",
+                        "page_index": visible_page_index,
+                        "width": page_button_width,
+                    }
+                )
+
+            if show_navigation_icons:
+                control_specs.extend(
+                    [
+                        {
+                            "kind": "after",
+                            "width": icon_button_width,
+                        },
+                        {
+                            "kind": "far_after",
+                            "width": icon_button_width,
+                        },
+                    ]
+                )
+
+            total_controls_width = sum(
+                spec["width"]
+                for spec in control_specs
+            )
+
+            total_controls_width += (
+                button_gap
+                * max(0, len(control_specs) - 1)
+            )
+
+            controls_x = (
+                (inner_x1 + inner_x2) / 2.0
+                - (total_controls_width / 2.0)
+            )
+
+            for control_index, spec in enumerate(
+                control_specs
+            ):
+                control_width = spec["width"]
+                control_center_x = (
+                    controls_x + (control_width / 2.0)
+                )
+
+                kind = spec["kind"]
+                control_tag = (
+                    f"sf_page_control_{control_index}"
+                )
+
+                if kind == "far_before":
+                    enabled = (
+                        current_page > 0
+                        and not page_loading
+                    )
+
+                    _draw_pagination_button(
+                        card_canvas,
+                        center_x=control_center_x,
+                        center_y=footer_center_y,
+                        width=control_width,
+                        height=page_button_height,
+                        tag=control_tag,
+                        icon=far_before_icon_photo,
+                        text="|<",
+                        enabled=enabled,
+                        command=_go_to_first_result_page,
+                    )
+
+                elif kind == "before":
+                    enabled = (
+                        current_page > 0
+                        and not page_loading
+                    )
+
+                    _draw_pagination_button(
+                        card_canvas,
+                        center_x=control_center_x,
+                        center_y=footer_center_y,
+                        width=control_width,
+                        height=page_button_height,
+                        tag=control_tag,
+                        icon=before_icon_photo,
+                        text="<",
+                        enabled=enabled,
+                        command=lambda:
+                            _change_result_page(-1),
+                    )
+
+                elif kind == "page":
+                    visible_page_index = spec[
+                        "page_index"
+                    ]
+
+                    _draw_pagination_button(
+                        card_canvas,
+                        center_x=control_center_x,
+                        center_y=footer_center_y,
+                        width=control_width,
+                        height=page_button_height,
+                        tag=control_tag,
+                        text=str(
+                            visible_page_index + 1
+                        ),
+                        active=(
+                            visible_page_index
+                            == current_page
+                        ),
+                        enabled=not page_loading,
+                        command=(
+                            lambda target_page=
+                                visible_page_index:
+                                _go_to_result_page(
+                                    target_page
+                                )
+                        ),
+                    )
+
+                elif kind == "after":
+                    enabled = (
+                        current_page < page_count - 1
+                        and not page_loading
+                    )
+
+                    _draw_pagination_button(
+                        card_canvas,
+                        center_x=control_center_x,
+                        center_y=footer_center_y,
+                        width=control_width,
+                        height=page_button_height,
+                        tag=control_tag,
+                        icon=after_icon_photo,
+                        text=">",
+                        enabled=enabled,
+                        command=lambda:
+                            _change_result_page(1),
+                    )
+
+                elif kind == "far_after":
+                    enabled = (
+                        current_page < page_count - 1
+                        and not page_loading
+                    )
+
+                    _draw_pagination_button(
+                        card_canvas,
+                        center_x=control_center_x,
+                        center_y=footer_center_y,
+                        width=control_width,
+                        height=page_button_height,
+                        tag=control_tag,
+                        icon=far_after_icon_photo,
+                        text=">|",
+                        enabled=enabled,
+                        command=_go_to_last_result_page,
+                    )
+
+                controls_x += (
+                    control_width + button_gap
+                )
+
+        card_canvas.result_table_icons_ref = {
+            **result_table_icons,
+            "far_before": far_before_icon_photo,
+            "before": before_icon_photo,
+            "after": after_icon_photo,
+            "far_after": far_after_icon_photo,
+        }
+
+    def _draw_detail_field(
+        canvas,
+        *,
+        x,
+        y,
+        width,
+        label,
+        value,
+        value_font=None,
+    ):
+        label_font = app._font(9, "bold")
+        resolved_value_font = value_font or app._font(10)
+
+        canvas.create_text(
+            x,
+            y,
+            text=label,
             fill=SF_TEXT_PLACEHOLDER,
-            font=app._font(11),
-            anchor="center",
+            font=label_font,
+            anchor="nw",
         )
 
-        # Keep icon references alive on the canvas.
-        card_canvas.result_table_icons_ref = result_table_icons
+        value_y = y + 22
+
+        value_id = canvas.create_text(
+            x,
+            value_y,
+            text=_format_detail_value(value),
+            fill=SF_TEXT_DARK,
+            font=resolved_value_font,
+            anchor="nw",
+            width=max(20, width),
+            justify="left",
+        )
+
+        bbox = canvas.bbox(value_id)
+
+        if bbox is None:
+            return value_y + 22
+
+        return bbox[3] + 16
+
+    def _draw_file_details():
+        canvas = right_card
+        canvas.delete("all")
+
+        canvas_width = max(
+            100,
+            canvas.winfo_width(),
+        )
+        full_height = max(
+            100,
+            canvas.winfo_height(),
+        )
+        card_height = max(
+            100,
+            full_height - 12,
+        )
+
+        card_x1 = 1
+        card_y1 = 1
+        card_x2 = max(60, canvas_width - 1)
+        card_y2 = card_height - 1
+
+        app._smooth_rounded_rect(
+            canvas,
+            card_x1,
+            card_y1,
+            card_x2,
+            card_y2,
+            24,
+            fill=colors.SURFACE_ALT,
+            outline=SF_BORDER,
+            width=1,
+        )
+
+        inner_x = card_x1 + 20
+        inner_width = max(
+            40,
+            card_x2 - inner_x - 20,
+        )
+
+        selected_result = _get_selected_result()
+
+        if selected_result is None:
+            canvas.create_text(
+                (card_x1 + card_x2) / 2.0,
+                card_y1 + 90,
+                text="파일 상세 정보",
+                fill=SF_TEXT_MAIN,
+                font=app._font(14, "bold"),
+                anchor="center",
+            )
+
+            canvas.create_text(
+                (card_x1 + card_x2) / 2.0,
+                card_y1 + 140,
+                text=(
+                    "검색 결과에서 파일을 선택하면\n"
+                    "상세 정보가 여기에 표시돼요."
+                ),
+                fill=SF_TEXT_PLACEHOLDER,
+                font=app._font(10),
+                justify="center",
+                anchor="center",
+            )
+            return
+
+        y_cursor = card_y1 + 22
+
+        canvas.create_text(
+            inner_x,
+            y_cursor,
+            text="파일 상세 정보",
+            fill=SF_TEXT_MAIN,
+            font=app._font(14, "bold"),
+            anchor="nw",
+        )
+        y_cursor += 42
+
+        canvas.create_line(
+            inner_x,
+            y_cursor,
+            card_x2 - 20,
+            y_cursor,
+            fill=SF_BORDER,
+            width=1,
+        )
+        y_cursor += 20
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="원본 파일명",
+            value=selected_result.get(
+                "original_filename"
+            ),
+            value_font=app._font(11, "bold"),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="보관 파일명",
+            value=selected_result.get(
+                "archived_filename"
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="문서 유형",
+            value=selected_result.get(
+                "document_type"
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="문서 날짜",
+            value=selected_result.get(
+                "document_date"
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="업로드한 사람",
+            value=selected_result.get(
+                "uploaded_by"
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="업로드 날짜",
+            value=_format_archived_at(
+                selected_result.get("archived_at")
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="파일 종류",
+            value=selected_result.get(
+                "file_ext"
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="파일 크기",
+            value=_format_file_size(
+                selected_result.get("file_size")
+            ),
+        )
+
+        y_cursor = _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="태그",
+            value=selected_result.get("tags"),
+        )
+
+        _draw_detail_field(
+            canvas,
+            x=inner_x,
+            y=y_cursor,
+            width=inner_width,
+            label="보관 경로",
+            value=selected_result.get(
+                "relative_path"
+            ),
+        )
 
     def _draw_search_box():
         top_card_width = max(100, left_top_card.winfo_width())
@@ -1238,6 +4389,50 @@ def show_search_files_screen(app):
 
         _refresh_layout_drawings()
 
+    left_bottom_card.bind(
+        "<Up>",
+        lambda _event:
+            _move_result_selection(-1),
+    )
+
+    left_bottom_card.bind(
+        "<Down>",
+        lambda _event:
+            _move_result_selection(1),
+    )
+
+    left_bottom_card.bind(
+        "<Prior>",
+        lambda _event:
+            _move_result_page(-1),
+    )
+
+    left_bottom_card.bind(
+        "<Next>",
+        lambda _event:
+            _move_result_page(1),
+    )
+
+    left_bottom_card.bind(
+        "<Home>",
+        _select_first_result,
+    )
+
+    left_bottom_card.bind(
+        "<End>",
+        _select_last_result,
+    )
+
+    left_bottom_card.bind(
+        "<space>",
+        _toggle_keyboard_selected_result,
+    )
+
+    left_bottom_card.bind(
+        "<Escape>",
+        _clear_detail_selection,
+    )
+
     left_top_card.bind("<Configure>", _on_layout_change)
     left_bottom_card.bind("<Configure>", _on_layout_change)
     split.bind("<Configure>", _on_layout_change)
@@ -1247,6 +4442,7 @@ def show_search_files_screen(app):
     def _on_screen_destroy(_event=None):
         _close_dropdown_popup("doc_type")
         _close_dropdown_popup("file_type")
+        _close_calendar_popup()
 
     left_top_card.bind("<Destroy>", _on_screen_destroy, add="+")
 
