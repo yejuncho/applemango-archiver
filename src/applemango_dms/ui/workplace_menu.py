@@ -51,11 +51,11 @@ def _load_workspace_icon(app, icon_key, filename, *, size=18):
 def _get_workspace_nav_icon_map(app):
     return {
         "save": {
-            "normal": app.ui_icon_photos.get("workspace_file_save") or _load_workspace_icon(app, "file_save_blue", "file_save_blue.svg"),
+            "normal": app.ui_icon_photos.get("workspace_file_save") or _load_workspace_icon(app, "file_save", "file_save.svg"),
             "active": app.ui_icon_photos.get("file_save_white") or _load_workspace_icon(app, "file_save_white", "file_save_white.svg"),
         },
         "search": {
-            "normal": app.ui_icon_photos.get("workspace_file_search") or _load_workspace_icon(app, "file_search_green", "file_search_green.svg"),
+            "normal": app.ui_icon_photos.get("workspace_file_search") or _load_workspace_icon(app, "file_search", "file_search.svg"),
             "active": app.ui_icon_photos.get("file_search_white") or _load_workspace_icon(app, "file_search_white", "file_search_white.svg"),
         },
         "sync": {
@@ -140,20 +140,66 @@ def _format_nas_usage_display(used_bytes, total_bytes):
         "ratio": ratio,
     }
 
+def _remove_widget_focus_artifacts(widget):
+    if widget is None:
+        return
+
+    for options in (
+        {"highlightthickness": 0},
+        {"bd": 0},
+        {"borderwidth": 0},
+        {"relief": "flat"},
+        {"takefocus": False},
+    ):
+        try:
+            widget.configure(**options)
+        except (tk.TclError, TypeError):
+            continue
+
+    canvas = getattr(widget, "_canvas", None)
+    if canvas is not None:
+        try:
+            canvas.configure(
+                highlightthickness=0,
+                bd=0,
+                relief="flat",
+                takefocus=0,
+            )
+        except (tk.TclError, AttributeError):
+            pass
+
 def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     rows = []
+    row_visuals = {}
     nav_icons = _get_workspace_nav_icon_map(app)
-    nav_section = tk.Frame(parent, bg=parent.cget("bg"))
+    nav_state = {
+        "active_key": active_key,
+        "navigating": False,
+    }
+
+    nav_section = tk.Frame(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0)
     nav_section.pack(fill="both", expand=True)
+    _remove_widget_focus_artifacts(nav_section)
 
     card_pad_x = 1
     card_height = 100
     card_gap_y = card_pad_x
     nav_min_shell_height = (card_height * max(1, len(items))) + (card_gap_y * max(0, len(items) - 1)) + 12
 
-    nav_top_shell = tk.Canvas(nav_section, bg=parent.cget("bg"), highlightthickness=0, bd=0)
+    nav_top_shell = tk.Canvas(
+        nav_section,
+        bg=parent.cget("bg"),
+        highlightthickness=0,
+        bd=0,
+        borderwidth=0,
+        relief="flat",
+        takefocus=0,
+    )
     nav_top_shell.pack(side="top", fill="x", padx=card_pad_x, pady=(card_pad_x, 0))
-    nav_top = tk.Frame(nav_top_shell, bg=parent.cget("bg"))
+    _remove_widget_focus_artifacts(nav_top_shell)
+
+    nav_top = tk.Frame(nav_top_shell, bg=parent.cget("bg"), highlightthickness=0, bd=0)
+    _remove_widget_focus_artifacts(nav_top)
     nav_top_window_id = nav_top_shell.create_window(0, 0, window=nav_top, anchor="nw")
 
     def redraw_nav_top_shell(_event=None):
@@ -183,35 +229,62 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     nav_top_shell.bind("<Configure>", redraw_nav_top_shell, add="+")
     nav_top.bind("<Configure>", sync_nav_top_shell_height, add="+")
 
-    nav_spacer = tk.Frame(nav_section, bg=parent.cget("bg"))
+    nav_spacer = tk.Frame(nav_section, bg=parent.cget("bg"), highlightthickness=0, bd=0)
     nav_spacer.pack(side="top", fill="both", expand=True)
+    _remove_widget_focus_artifacts(nav_spacer)
+
+    def set_active_navigation(next_key):
+        if not next_key or nav_state["active_key"] == next_key:
+            return
+
+        nav_state["active_key"] = next_key
+        for row_key, renderer in row_visuals.items():
+            mode = "active" if row_key == next_key else "normal"
+            renderer(mode, force=True)
+        nav_section.after_idle(nav_section.update_idletasks)
 
     def build_row(key, icon, title, desc, command, icon_fg, active_bg, is_last):
-        is_active = key == active_key
         base_bg = parent.cget("bg")
         hover_bg = MENU_NAV_HOVER_BG
 
-        outer = tk.Frame(nav_top, bg=base_bg)
+        outer = tk.Frame(nav_top, bg=base_bg, highlightthickness=0, bd=0)
         outer.pack(fill="x", pady=(0, 0 if is_last else card_gap_y))
+        _remove_widget_focus_artifacts(outer)
 
         card = tk.Canvas(
             outer,
             bg=base_bg,
             highlightthickness=0,
             bd=0,
+            borderwidth=0,
             relief="flat",
             cursor="hand2",
             height=card_height,
+            takefocus=0,
         )
         card.pack(fill="x")
+        _remove_widget_focus_artifacts(card)
 
-        def activate(_event=None):
-            command()
+        render_state = {
+            "mode": None,
+            "width": 0,
+            "height": 0,
+        }
 
-        def apply_style(mode="normal"):
-            nonlocal is_active
+        def apply_style(mode="normal", force=False):
             nav_card_inset = 2
             nav_card_radius = 24
+            width = max(180, card.winfo_width())
+            height = max(card_height, card.winfo_height())
+
+            if (
+                not force
+                and render_state["mode"] == mode
+                and render_state["width"] == width
+                and render_state["height"] == height
+            ):
+                return
+
             if mode == "active":
                 bg_color = active_bg
                 border = active_bg
@@ -235,8 +308,6 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
                 desc_color = MENU_TEXT_PRIMARY
 
             card.delete("nav")
-            width = max(180, card.winfo_width())
-            height = max(card_height, card.winfo_height())
             app._smooth_rounded_rect(
                 card,
                 nav_card_inset,
@@ -278,16 +349,42 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
                 tags="nav",
             )
 
-        card.bind("<Configure>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+            render_state["mode"] = mode
+            render_state["width"] = width
+            render_state["height"] = height
+
+        def activate(_event=None):
+            if nav_state["navigating"]:
+                return "break"
+
+            if key == nav_state["active_key"]:
+                return "break"
+
+            set_active_navigation(key)
+            nav_state["navigating"] = True
+
+            def _run_navigation_once():
+                try:
+                    command()
+                finally:
+                    nav_state["navigating"] = False
+
+            try:
+                app.root.after_idle(_run_navigation_once)
+            except Exception:
+                nav_state["navigating"] = False
+                command()
+
+            return "break"
+
+        card.bind("<Configure>", lambda _event: apply_style("active" if key == nav_state["active_key"] else "normal"), add="+")
         card.bind("<Button-1>", activate, add="+")
-        outer.bind("<Button-1>", activate, add="+")
         card.bind("<Enter>", lambda _event: apply_style("hover"), add="+")
-        card.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
-        outer.bind("<Enter>", lambda _event: apply_style("hover"), add="+")
-        outer.bind("<Leave>", lambda _event: apply_style("active" if is_active else "normal"), add="+")
+        card.bind("<Leave>", lambda _event: apply_style("active" if key == nav_state["active_key"] else "normal"), add="+")
 
         rows.append(card)
-        apply_style("active" if is_active else "normal")
+        row_visuals[key] = apply_style
+        card.after_idle(lambda: apply_style("active" if key == nav_state["active_key"] else "normal", force=True))
         return card
 
     total = len(items)
@@ -316,6 +413,8 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
         height=card_height,
     )
     storage_card.pack(fill="x")
+    _remove_widget_focus_artifacts(storage_outer)
+    _remove_widget_focus_artifacts(storage_card)
 
     usage_data = _format_nas_usage_display(*_get_nas_storage_usage_bytes(app))
     storage_state = {"active": False}
@@ -474,7 +573,11 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     configure_bind_id = nav_section.bind("<Configure>", mount_storage_card_when_ready, add="+")
     nav_section.after_idle(mount_storage_card_when_ready)
 
-    return rows
+    return {
+        "rows": rows,
+        "root": nav_section,
+        "set_active": set_active_navigation,
+    }
 
 def _workspace_sidebar_items(app):
     return [
@@ -493,13 +596,34 @@ def _workspace_sidebar_icon_photos(app):
     }
 
 def render_workspace_sidebar_nav(app, parent, active_key):
-    return build_sidebar_nav(
+    controller = getattr(app, "_workspace_sidebar_nav_controller", None)
+    controller_root = controller.get("root") if isinstance(controller, dict) else None
+
+    if (
+        isinstance(controller, dict)
+        and controller.get("parent") is parent
+        and controller_root is not None
+    ):
+        try:
+            if controller_root.winfo_exists():
+                controller["set_active"](active_key)
+                return controller.get("rows", [])
+        except Exception:
+            pass
+
+    for child in parent.winfo_children():
+        child.destroy()
+
+    controller = build_sidebar_nav(
         app,
         parent,
         active_key,
         _workspace_sidebar_items(app),
         icon_photos=_workspace_sidebar_icon_photos(app),
     )
+    controller["parent"] = parent
+    app._workspace_sidebar_nav_controller = controller
+    return controller.get("rows", [])
 
 def show_main_workspace_menu(app):
     if not state.active_workspace:

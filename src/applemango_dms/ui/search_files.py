@@ -2,6 +2,7 @@ import sqlite3
 import tkinter as tk
 from calendar import monthrange
 from datetime import date, datetime, timedelta
+from tkinter import TclError
 import applemango_dms.config as config
 import applemango_dms.state as state
 from applemango_dms.ui.workplace_menu import render_workspace_sidebar_nav
@@ -299,6 +300,10 @@ def show_search_files_screen(app):
     }
     layout_state = {
         "retry_job": None,
+        "initial_layout_job": None,
+    }
+    screen_lifecycle = {
+        "destroyed": False,
     }
 
     result_table_state = {
@@ -328,6 +333,19 @@ def show_search_files_screen(app):
 
     search_action_button = None
 
+    def _is_search_screen_alive():
+        if screen_lifecycle["destroyed"]:
+            return False
+
+        for widget in (board, split, left_col, left_top_card, left_bottom_card, right_card):
+            try:
+                if widget is None or not widget.winfo_exists():
+                    return False
+            except TclError:
+                return False
+
+        return True
+
     def _is_descendant_of(widget, ancestor):
         current = widget
         while current is not None:
@@ -337,6 +355,9 @@ def show_search_files_screen(app):
         return False
 
     def _on_click_outside_search_box(event):
+        if not board.winfo_exists():
+            return
+
         calendar_popup = calendar_popup_state.get(
             "popup"
         )
@@ -1329,6 +1350,9 @@ def show_search_files_screen(app):
         rounded._reposition_placeholder()
 
     def _compute_left_top_targets():
+        if not _is_search_screen_alive():
+            return 1, 1, 1
+
         total_height = max(1, left_col.winfo_height())
         available_height = max(1, total_height - gap)
 
@@ -1345,16 +1369,33 @@ def show_search_files_screen(app):
         return collapsed_height, expanded_height, available_height
 
     def _has_valid_left_layout_space():
+        if not _is_search_screen_alive():
+            return False
+
         min_height = search_box_inset + search_box_height + filter_row_top_gap + filter_row_height + 20
-        return left_col.winfo_width() > 160 and left_col.winfo_height() >= min_height
+        try:
+            return left_col.winfo_width() > 160 and left_col.winfo_height() >= min_height
+        except TclError:
+            return False
 
     def _schedule_layout_retry():
+        if not _is_search_screen_alive():
+            return
+
         if layout_state["retry_job"] is not None:
             return
-        layout_state["retry_job"] = app.root.after(24, _retry_layout)
+
+        try:
+            layout_state["retry_job"] = app.root.after(24, _retry_layout)
+        except TclError:
+            layout_state["retry_job"] = None
 
     def _retry_layout():
         layout_state["retry_job"] = None
+
+        if not _is_search_screen_alive():
+            return
+
         _on_layout_change()
 
     def _place_left_cards(top_height):
@@ -1379,10 +1420,26 @@ def show_search_files_screen(app):
         filter_toggle_icon.image = icon
 
     def _set_dropdown_icon(toggle_widget, expanded):
+        if toggle_widget is None:
+            return
+
+        icon_label = getattr(toggle_widget, "icon_label", None)
+        if icon_label is None:
+            return
+
+        try:
+            if not icon_label.winfo_exists():
+                return
+        except TclError:
+            return
+
         icon = collapse_icon_photo if expanded else expand_icon_photo
         fallback = "▴" if expanded else "▾"
-        toggle_widget.icon_label.configure(image=icon, text=fallback if icon is None else "")
-        toggle_widget.image = icon
+        try:
+            icon_label.configure(image=icon, text=fallback if icon is None else "")
+            toggle_widget.image = icon
+        except TclError:
+            return
 
     def _close_dropdown_popup(kind):
         popup_key = f"{kind}_popup"
@@ -2059,6 +2116,9 @@ def show_search_files_screen(app):
         _set_dropdown_icon(file_type_field["toggle"], dropdown_state["file_type_expanded"])
 
     def _refresh_layout_drawings():
+        if not _is_search_screen_alive():
+            return
+
         _draw_card(left_top_card, bottom_shrink=0)
         _draw_results_table()
         _draw_file_details()
@@ -2078,7 +2138,15 @@ def show_search_files_screen(app):
 
     def _animate_filter_height_step():
         filter_panel_state["anim_job"] = None
-        now_ms = int(app.root.tk.call("clock", "milliseconds"))
+
+        if not _is_search_screen_alive():
+            return
+
+        try:
+            now_ms = int(app.root.tk.call("clock", "milliseconds"))
+        except TclError:
+            return
+
         elapsed = now_ms - int(filter_panel_state["anim_start_time"])
         duration = max(1, int(filter_panel_state["anim_duration_ms"]))
         progress = min(1.0, max(0.0, elapsed / float(duration)))
@@ -2094,11 +2162,20 @@ def show_search_files_screen(app):
             _finish_filter_animation(filter_panel_state["target_expanded"])
             return
 
-        filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
+        try:
+            filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
+        except TclError:
+            filter_panel_state["anim_job"] = None
 
     def _toggle_filter_panel():
+        if not _is_search_screen_alive():
+            return
+
         if filter_panel_state["anim_job"] is not None:
-            app.root.after_cancel(filter_panel_state["anim_job"])
+            try:
+                app.root.after_cancel(filter_panel_state["anim_job"])
+            except TclError:
+                pass
             filter_panel_state["anim_job"] = None
 
         target_expanded = not bool(filter_panel_state["target_expanded"])
@@ -2114,8 +2191,11 @@ def show_search_files_screen(app):
 
         filter_panel_state["anim_start_height"] = current_height
         filter_panel_state["anim_target_height"] = float(target_height)
-        filter_panel_state["anim_start_time"] = int(app.root.tk.call("clock", "milliseconds"))
-        filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
+        try:
+            filter_panel_state["anim_start_time"] = int(app.root.tk.call("clock", "milliseconds"))
+            filter_panel_state["anim_job"] = app.root.after(16, _animate_filter_height_step)
+        except TclError:
+            filter_panel_state["anim_job"] = None
 
     search_input = RoundedInput(
         search_input_holder,
@@ -2392,7 +2472,7 @@ def show_search_files_screen(app):
     filter_label.pack(side="left", padx=(2, 0))
     filter_toggle_icon.pack(side="left", padx=(1, 0))
 
-    app.root.bind("<Button-1>", _on_click_outside_search_box, add="+")
+    root_click_binding_id = app.root.bind("<Button-1>", _on_click_outside_search_box, add="+")
 
     def _draw_card(card_canvas, bottom_shrink=12):
         card_canvas.delete("all")
@@ -4420,6 +4500,9 @@ def show_search_files_screen(app):
         )
 
     def _on_layout_change(_event=None):
+        if not _is_search_screen_alive():
+            return
+
         if not _has_valid_left_layout_space():
             _schedule_layout_retry()
             return
@@ -4482,6 +4565,35 @@ def show_search_files_screen(app):
     left_col.bind("<Configure>", _on_layout_change)
 
     def _on_screen_destroy(_event=None):
+        screen_lifecycle["destroyed"] = True
+
+        if root_click_binding_id:
+            try:
+                app.root.unbind("<Button-1>", root_click_binding_id)
+            except Exception:
+                pass
+
+        if layout_state["retry_job"] is not None:
+            try:
+                app.root.after_cancel(layout_state["retry_job"])
+            except Exception:
+                pass
+            layout_state["retry_job"] = None
+
+        if layout_state["initial_layout_job"] is not None:
+            try:
+                app.root.after_cancel(layout_state["initial_layout_job"])
+            except Exception:
+                pass
+            layout_state["initial_layout_job"] = None
+
+        if filter_panel_state["anim_job"] is not None:
+            try:
+                app.root.after_cancel(filter_panel_state["anim_job"])
+            except Exception:
+                pass
+            filter_panel_state["anim_job"] = None
+
         _close_dropdown_popup("doc_type")
         _close_dropdown_popup("file_type")
         _close_calendar_popup()
@@ -4489,4 +4601,4 @@ def show_search_files_screen(app):
     left_top_card.bind("<Destroy>", _on_screen_destroy, add="+")
 
     _set_filter_toggle_visuals(False)
-    app.root.after_idle(_on_layout_change)
+    layout_state["initial_layout_job"] = app.root.after_idle(_on_layout_change)

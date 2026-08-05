@@ -5,9 +5,36 @@ import applemango_dms.state as state
 from applemango_dms.ui.header_controls import build_header_controls
 
 
+def _is_workspace_shell_alive(shell):
+    if not isinstance(shell, dict):
+        return False
+
+    required = ("bg", "shell", "header", "body", "sidebar", "content")
+    for key in required:
+        widget = shell.get(key)
+        if widget is None:
+            return False
+        try:
+            if not widget.winfo_exists():
+                return False
+        except Exception:
+            return False
+
+    return True
+
+
 def create_workspace_shell(app):
     app._resize(1372, 900)
     app.root.title("애플망고 DMS - 워크스페이스")
+
+    cached_shell = getattr(app, "_workspace_shell_cache", None)
+    if _is_workspace_shell_alive(cached_shell):
+        app.root.configure(bg="#ffffff")
+        content_area = cached_shell["content"]
+        for child in content_area.winfo_children():
+            child.destroy()
+        return cached_shell
+
     app.clear_screen()
     app.root.configure(bg="#ffffff")
 
@@ -78,7 +105,7 @@ def create_workspace_shell(app):
     content_area = tk.Frame(body, bg="#ffffff", highlightthickness=0, bd=0)
     content_area.pack(side="left", fill="both", expand=True)
 
-    return {
+    shell_data = {
         "bg": bg,
         "card": main_card,
         "content": content_area,
@@ -87,6 +114,10 @@ def create_workspace_shell(app):
         "header": header,
         "body": body,
     }
+
+    app._workspace_shell_cache = shell_data
+    app._workspace_sidebar_nav_controller = None
+    return shell_data
 
 
 def build_workspace_page_header(app, parent, title, subtitle):

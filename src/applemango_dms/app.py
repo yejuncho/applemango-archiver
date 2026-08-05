@@ -150,6 +150,8 @@ class SequenceArchiverApp:
         self.startup_logo_image = None
         self.ui_icon_photos = {}
         self.login_icon_photos = {}
+        self._workspace_shell_cache = None
+        self._workspace_sidebar_nav_controller = None
         self.login_connectivity = {
             "dot_canvas": None,
             "dot_item": None,
@@ -325,6 +327,8 @@ class SequenceArchiverApp:
     def clear_screen(self):
         for child in self.root.winfo_children():
             child.destroy()
+        self._workspace_shell_cache = None
+        self._workspace_sidebar_nav_controller = None
 
     @staticmethod
     def _resize_image_fit(image, max_width, max_height):
