@@ -7,6 +7,15 @@ class ArchiveDatabase:
     STATUS_DELETED = 'deleted'
     STATUS_MISSING = 'missing'
 
+    RECORD_ORIGIN_DMS_UPLOAD = "dms_upload"
+    RECORD_ORIGIN_NAS_SCAN = "nas_scan"
+
+    METADATA_STATUS_COMPLETE = "complete"
+    METADATA_STATUS_INCOMPLETE = "incomplete"
+
+    RECONCILIATION_DOCUMENT_TYPE_NAME = "미분류"
+    RECONCILIATION_UPLOADER_NAME = "시스템: NAS 동기화"
+
     SEARCH_FIELD_ALL = 'all'
     SEARCH_FIELD_ORIGINAL_FILENAME = 'original_filename'
     SEARCH_FIELD_ARCHIVED_FILENAME = 'archived_filename'
@@ -169,6 +178,25 @@ class ArchiveDatabase:
 
                     checksum TEXT,
 
+                    -- record provenance
+                    record_origin TEXT NOT NULL DEFAULT 'dms_upload'
+                        CHECK (
+                            record_origin IN (
+                                'dms_upload',
+                                'nas_scan'
+                            )
+                        ),
+
+                    metadata_status TEXT NOT NULL DEFAULT 'complete'
+                        CHECK (
+                            metadata_status IN (
+                                'complete',
+                                'incomplete'
+                            )
+                        ),
+
+                    discovered_at TEXT,
+
                     -- lifecycle
                     archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -247,8 +275,69 @@ class ArchiveDatabase:
                 """
             )
 
+            self._migrate_files_reconciliation_columns(
+                conn
+            )
+
             self._create_indexes(conn)
             conn.commit()
+
+    def _migrate_files_reconciliation_columns(
+        self,
+        conn,
+    ):
+        """
+        Add reconciliation metadata columns to an existing files
+        table without rebuilding or deleting existing records.
+        """
+        rows = conn.execute(
+            """
+            PRAGMA table_info(files);
+            """
+        ).fetchall()
+
+        existing_columns = {
+            str(row["name"])
+            for row in rows
+        }
+
+        if "record_origin" not in existing_columns:
+            conn.execute(
+                """
+                ALTER TABLE files
+                ADD COLUMN record_origin TEXT NOT NULL
+                    DEFAULT 'dms_upload'
+                    CHECK (
+                        record_origin IN (
+                            'dms_upload',
+                            'nas_scan'
+                        )
+                    );
+                """
+            )
+
+        if "metadata_status" not in existing_columns:
+            conn.execute(
+                """
+                ALTER TABLE files
+                ADD COLUMN metadata_status TEXT NOT NULL
+                    DEFAULT 'complete'
+                    CHECK (
+                        metadata_status IN (
+                            'complete',
+                            'incomplete'
+                        )
+                    );
+                """
+            )
+
+        if "discovered_at" not in existing_columns:
+            conn.execute(
+                """
+                ALTER TABLE files
+                ADD COLUMN discovered_at TEXT;
+                """
+            )
 
     def _create_indexes(self, conn):
         conn.execute(
@@ -314,6 +403,18 @@ class ArchiveDatabase:
             """
         )
 
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                idx_files_workspace_reconciliation
+            ON files(
+                workspace_id,
+                record_origin,
+                metadata_status
+            );
+            """
+        )
+
     def get_document_types(self, workspace_id):
         with self._connect() as conn:
             rows = conn.execute(
@@ -329,6 +430,116 @@ class ArchiveDatabase:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def _ensure_reconciliation_document_type_with_conn(
+        self,
+        conn,
+        workspace_id,
+    ):
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        workspace_row = conn.execute(
+            """
+            SELECT id
+            FROM workspaces
+            WHERE id = ?
+              AND is_active = 1
+              AND deleted_at IS NULL
+            """,
+            (normalized_workspace_id,),
+        ).fetchone()
+
+        if workspace_row is None:
+            raise LookupError(
+                "Active workspace not found."
+            )
+
+        row = conn.execute(
+            """
+            SELECT id
+            FROM document_types
+            WHERE workspace_id = ?
+              AND name = ?
+            LIMIT 1
+            """,
+            (
+                normalized_workspace_id,
+                self.RECONCILIATION_DOCUMENT_TYPE_NAME,
+            ),
+        ).fetchone()
+
+        if row is not None:
+            document_type_id = int(row["id"])
+
+            conn.execute(
+                """
+                UPDATE document_types
+                SET
+                    is_active = 1,
+                    deleted_at = NULL
+                WHERE id = ?
+                  AND workspace_id = ?
+                """,
+                (
+                    document_type_id,
+                    normalized_workspace_id,
+                ),
+            )
+
+            return document_type_id
+
+        sort_row = conn.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order
+            FROM document_types
+            WHERE workspace_id = ?
+            """,
+            (normalized_workspace_id,),
+        ).fetchone()
+
+        next_sort_order = (
+            int(sort_row["max_sort_order"]) + 1
+            if sort_row is not None
+            else 0
+        )
+
+        cursor = conn.execute(
+            """
+            INSERT INTO document_types (
+                workspace_id,
+                name,
+                is_active,
+                sort_order,
+                deleted_at
+            )
+            VALUES (?, ?, 1, ?, NULL)
+            """,
+            (
+                normalized_workspace_id,
+                self.RECONCILIATION_DOCUMENT_TYPE_NAME,
+                next_sort_order,
+            ),
+        )
+
+        return int(cursor.lastrowid)
+
+    def ensure_reconciliation_document_type(
+        self,
+        workspace_id,
+    ):
+        with self._connect() as conn:
+            return (
+                self
+                ._ensure_reconciliation_document_type_with_conn(
+                    conn,
+                    workspace_id,
+                )
+            )
 
     def ensure_workspace(self, workspace_name, share_path, default_document_types):
         normalized_name = self._require_text(workspace_name, "workspace_name")
@@ -458,6 +669,9 @@ class ArchiveDatabase:
             "source_modified_at": row[
                 "source_modified_at"
             ],
+            "record_origin": row["record_origin"],
+            "metadata_status": row["metadata_status"],
+            "discovered_at": row["discovered_at"],
             "archived_at": row["archived_at"],
             "status": row["status"],
             "deleted_at": row["deleted_at"],
@@ -886,6 +1100,9 @@ class ArchiveDatabase:
                     f.file_size,
                     f.source_created_at,
                     f.source_modified_at,
+                    f.record_origin,
+                    f.metadata_status,
+                    f.discovered_at,
                     f.archived_at,
                     f.status,
                     f.deleted_at,
@@ -984,6 +1201,51 @@ class ArchiveDatabase:
 
         return page["results"]
 
+    def get_workspace_file_index(self, workspace_id):
+        """
+        Return a normalized relative-path index for one workspace.
+
+        The dictionary key is Path(relative_path).as_posix().casefold()
+        and the value contains only minimal record metadata.
+        """
+        normalized_workspace_id = self._normalize_positive_int(
+            workspace_id,
+            "workspace_id",
+        )
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    relative_path,
+                    archived_filename
+                FROM files
+                WHERE workspace_id = ?
+                """,
+                (normalized_workspace_id,),
+            ).fetchall()
+
+        file_index = {}
+
+        for row in rows:
+            relative_path = str(row["relative_path"] or "").strip()
+
+            if not relative_path:
+                continue
+
+            normalized_relative_path = (
+                Path(relative_path).as_posix().casefold()
+            )
+
+            file_index[normalized_relative_path] = {
+                "file_id": int(row["id"]),
+                "relative_path": relative_path,
+                "archived_filename": row["archived_filename"],
+            }
+
+        return file_index
+
     def get_file_by_id(
         self,
         workspace_id,
@@ -1044,6 +1306,9 @@ class ArchiveDatabase:
                     f.file_size,
                     f.source_created_at,
                     f.source_modified_at,
+                    f.record_origin,
+                    f.metadata_status,
+                    f.discovered_at,
                     f.archived_at,
                     f.status,
                     f.deleted_at,
@@ -1841,6 +2106,31 @@ class ArchiveDatabase:
         return normalized or None
 
     @staticmethod
+    def _infer_discovered_document_date(
+        source_modified_at,
+        source_created_at,
+    ):
+        for value in (
+            source_modified_at,
+            source_created_at,
+        ):
+            normalized = str(value or "").strip()
+
+            if not normalized:
+                continue
+
+            try:
+                parsed = datetime.fromisoformat(
+                    normalized
+                )
+            except ValueError:
+                continue
+
+            return parsed.strftime("%Y-%m-%d")
+
+        return datetime.now().strftime("%Y-%m-%d")
+
+    @staticmethod
     def _normalize_positive_int(value, field_name):
         try:
             normalized = int(value)
@@ -2619,6 +2909,42 @@ class ArchiveDatabase:
         }
 
     def _insert_file_record_with_conn(self, conn, record):
+        record_origin = str(
+            record.get(
+                "record_origin",
+                self.RECORD_ORIGIN_DMS_UPLOAD,
+            )
+        ).strip().lower()
+
+        metadata_status = str(
+            record.get(
+                "metadata_status",
+                self.METADATA_STATUS_COMPLETE,
+            )
+        ).strip().lower()
+
+        allowed_record_origins = {
+            self.RECORD_ORIGIN_DMS_UPLOAD,
+            self.RECORD_ORIGIN_NAS_SCAN,
+        }
+
+        allowed_metadata_statuses = {
+            self.METADATA_STATUS_COMPLETE,
+            self.METADATA_STATUS_INCOMPLETE,
+        }
+
+        if record_origin not in allowed_record_origins:
+            raise ValueError(
+                f"Unsupported record_origin: "
+                f"{record_origin}"
+            )
+
+        if metadata_status not in allowed_metadata_statuses:
+            raise ValueError(
+                f"Unsupported metadata_status: "
+                f"{metadata_status}"
+            )
+
         cursor = conn.execute(
             """
             INSERT INTO files (
@@ -2634,9 +2960,15 @@ class ArchiveDatabase:
                 file_ext,
                 mime_type,
                 file_size,
-                checksum
+                checksum,
+                record_origin,
+                metadata_status,
+                discovered_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?
+            )
             """,
             (
                 int(record["workspace_id"]),
@@ -2667,6 +2999,9 @@ class ArchiveDatabase:
                 record.get("mime_type"),
                 record.get("file_size"),
                 record.get("checksum"),
+                record_origin,
+                metadata_status,
+                record.get("discovered_at"),
             ),
         )
 
@@ -2756,6 +3091,190 @@ class ArchiveDatabase:
             )
 
         return file_id
+
+    def insert_discovered_file_record(
+        self,
+        workspace_id,
+        file_record,
+    ):
+        """
+        Insert one filesystem-discovered file as an incomplete NAS
+        reconciliation record.
+
+        Returns:
+            A dictionary containing:
+                inserted: bool
+                file_id: int
+                relative_path: str
+
+        An existing path is treated as an idempotent no-op.
+        """
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        if not isinstance(file_record, dict):
+            raise TypeError(
+                "file_record must be a dictionary."
+            )
+
+        original_filename = self._require_text(
+            file_record.get("original_filename"),
+            "original_filename",
+        )
+
+        archived_filename = self._require_text(
+            file_record.get("archived_filename"),
+            "archived_filename",
+        )
+
+        relative_path = self._require_text(
+            file_record.get("relative_path"),
+            "relative_path",
+        )
+
+        relative = Path(relative_path)
+
+        if (
+            relative.is_absolute()
+            or relative.anchor
+            or relative.drive
+            or relative.root
+            or ".." in relative.parts
+        ):
+            raise ValueError(
+                "relative_path must remain inside "
+                "the workspace."
+            )
+
+        if relative.name != archived_filename:
+            raise ValueError(
+                "relative_path must end with "
+                "archived_filename."
+            )
+
+        file_ext = self._normalize_file_ext(
+            file_record.get("file_ext")
+        )
+
+        source_created_at = (
+            self._normalize_optional_text(
+                file_record.get("source_created_at")
+            )
+        )
+
+        source_modified_at = (
+            self._normalize_optional_text(
+                file_record.get("source_modified_at")
+            )
+        )
+
+        file_size = (
+            self._normalize_optional_nonnegative_int(
+                file_record.get("file_size"),
+                "file_size",
+            )
+        )
+
+        discovered_at = datetime.now().isoformat(
+            sep=" ",
+            timespec="seconds",
+        )
+
+        document_date = (
+            self._infer_discovered_document_date(
+                source_modified_at,
+                source_created_at,
+            )
+        )
+
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM files
+                WHERE workspace_id = ?
+                  AND relative_path = ?
+                LIMIT 1
+                """,
+                (
+                    normalized_workspace_id,
+                    relative_path,
+                ),
+            ).fetchone()
+
+            if existing is not None:
+                return {
+                    "inserted": False,
+                    "file_id": int(existing["id"]),
+                    "relative_path": relative_path,
+                }
+
+            document_type_id = (
+                self
+                ._ensure_reconciliation_document_type_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                )
+            )
+
+            record = {
+                "workspace_id": normalized_workspace_id,
+                "document_type_id": document_type_id,
+                "uploaded_by": self.RECONCILIATION_UPLOADER_NAME,
+                "original_filename": original_filename,
+                "archived_filename": archived_filename,
+                "relative_path": relative_path,
+                "document_date": document_date,
+                "source_created_at": source_created_at,
+                "source_modified_at": source_modified_at,
+                "file_ext": file_ext,
+                "mime_type": None,
+                "file_size": file_size,
+                "checksum": None,
+                "record_origin": self.RECORD_ORIGIN_NAS_SCAN,
+                "metadata_status": self.METADATA_STATUS_INCOMPLETE,
+                "discovered_at": discovered_at,
+            }
+
+            try:
+                file_id = self._insert_file_record_with_conn(
+                    conn,
+                    record,
+                )
+
+            except sqlite3.IntegrityError:
+                existing = conn.execute(
+                    """
+                    SELECT id
+                    FROM files
+                    WHERE workspace_id = ?
+                      AND relative_path = ?
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_workspace_id,
+                        relative_path,
+                    ),
+                ).fetchone()
+
+                if existing is None:
+                    raise
+
+                return {
+                    "inserted": False,
+                    "file_id": int(existing["id"]),
+                    "relative_path": relative_path,
+                }
+
+        return {
+            "inserted": True,
+            "file_id": file_id,
+            "relative_path": relative_path,
+        }
 
     def insert_file_record(self, record):
         with self._connect() as conn:

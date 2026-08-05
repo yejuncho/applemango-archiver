@@ -33,6 +33,7 @@ SF_INPUT_IDLE_BORDER = colors.BORDER
 SF_INPUT_FOCUS_BORDER = colors.PRIMARY_PRESSED
 
 SF_RESULTS_PER_PAGE = 7
+SF_FILTER_EXPANDED_ROW_REDUCTION = 3
 SF_VISIBLE_PAGE_BUTTONS = 5
 SF_CALENDAR_WEEKDAYS = (
     "월",
@@ -86,9 +87,6 @@ def show_search_files_screen(app):
     left_cards_left_inset = 6
     left_cards_right_inset = 0
     search_box_height = 48
-    search_button_width = 78
-    reset_button_width = 88
-    search_control_gap = 10
     filter_row_top_gap = 10
     filter_row_height = 30
     filter_content_top_gap = 8
@@ -307,6 +305,7 @@ def show_search_files_screen(app):
         "select_all_checked": False,
         "page_index": 0,
         "rows_per_page": SF_RESULTS_PER_PAGE,
+        "base_row_height": None,
         "hovered_file_id": None,
     }
     result_sort_state = {
@@ -546,7 +545,10 @@ def show_search_files_screen(app):
             int(page_index),
         )
 
-        rows_per_page = SF_RESULTS_PER_PAGE
+        rows_per_page = max(
+            1,
+            int(result_table_state["rows_per_page"]),
+        )
         offset = normalized_page_index * rows_per_page
 
         page = app.db.search_files_page(
@@ -2069,6 +2071,9 @@ def show_search_files_screen(app):
         filter_panel_state["target_expanded"] = expanded
         filter_panel_state["anim_job"] = None
         _set_filter_toggle_visuals(expanded)
+        _sync_result_rows_per_page_for_layout(
+            reload_page=True,
+        )
         _refresh_layout_drawings()
 
     def _animate_filter_height_step():
@@ -2099,6 +2104,9 @@ def show_search_files_screen(app):
         target_expanded = not bool(filter_panel_state["target_expanded"])
         filter_panel_state["target_expanded"] = target_expanded
         _set_filter_toggle_visuals(target_expanded)
+        _sync_result_rows_per_page_for_layout(
+            reload_page=False,
+        )
 
         collapsed_height, expanded_height, _available = _compute_left_top_targets()
         target_height = expanded_height if target_expanded else collapsed_height
@@ -2134,26 +2142,6 @@ def show_search_files_screen(app):
     search_text_entry.bind("<Return>", _run_search)
 
     clear_icon_button = _create_icon_action(search_input_holder, clear_icon_photo, "✕", _clear_search_text)
-    search_action_button = (
-        _create_search_action_button(
-            search_box_holder,
-            text="검색",
-            command=_run_search,
-            width=search_button_width,
-            primary=True,
-            icon_photo=search_icon_photo,
-        )
-    )
-
-    reset_action_button = (
-        _create_search_action_button(
-            search_box_holder,
-            text="초기화",
-            command=_reset_search_screen,
-            width=reset_button_width,
-            primary=False,
-        )
-    )
 
     filter_toggle_icon = _create_icon_action(
         filter_row,
@@ -2388,20 +2376,6 @@ def show_search_files_screen(app):
     _set_dropdown_icon(doc_type_field["toggle"], False)
     _set_dropdown_icon(file_type_field["toggle"], False)
 
-    reset_action_button.pack(
-        side="right",
-        fill="y",
-    )
-
-    search_action_button.pack(
-        side="right",
-        fill="y",
-        padx=(
-            search_control_gap,
-            search_control_gap,
-        ),
-    )
-
     search_input_holder.pack(
         side="left",
         fill="both",
@@ -2618,6 +2592,41 @@ def show_search_files_screen(app):
         return (
             total_count + rows_per_page - 1
         ) // rows_per_page
+
+    def _get_target_rows_per_page_for_layout():
+        if filter_panel_state["target_expanded"]:
+            return max(
+                1,
+                SF_RESULTS_PER_PAGE - SF_FILTER_EXPANDED_ROW_REDUCTION,
+            )
+
+        return SF_RESULTS_PER_PAGE
+
+    def _sync_result_rows_per_page_for_layout(
+        *,
+        reload_page,
+    ):
+        target_rows_per_page = (
+            _get_target_rows_per_page_for_layout()
+        )
+
+        if int(result_table_state["rows_per_page"]) == int(target_rows_per_page):
+            return
+
+        result_table_state["rows_per_page"] = int(
+            target_rows_per_page
+        )
+        _clamp_result_page()
+
+        if (
+            reload_page
+            and search_state["has_searched"]
+            and not search_state["is_loading_page"]
+        ):
+            _request_search_page(
+                result_table_state["page_index"],
+                clear_detail=True,
+            )
 
     def _clamp_result_page():
         page_count = _get_page_count()
@@ -2972,9 +2981,14 @@ def show_search_files_screen(app):
         _draw_results_table()
 
     def _get_current_page_file_ids():
+        rows_per_page = max(
+            1,
+            int(result_table_state["rows_per_page"]),
+        )
+
         return {
             int(result["file_id"])
-            for result in search_state["results"]
+            for result in search_state["results"][:rows_per_page]
         }
 
     def _clear_result_selection():
@@ -3532,9 +3546,30 @@ def show_search_files_screen(app):
 
         results = search_state["results"]
 
-        rows_per_page = SF_RESULTS_PER_PAGE
-        result_table_state["rows_per_page"] = (
-            rows_per_page
+        rows_per_page = max(
+            1,
+            int(result_table_state["rows_per_page"]),
+        )
+
+        # Keep result row spacing stable across filter expand/collapse.
+        if not filter_panel_state["target_expanded"]:
+            result_table_state["base_row_height"] = max(
+                32,
+                int(
+                    body_height
+                    / max(1, SF_RESULTS_PER_PAGE)
+                ),
+            )
+
+        row_height = max(
+            32,
+            int(
+                result_table_state["base_row_height"]
+                or (
+                    body_height
+                    / max(1, SF_RESULTS_PER_PAGE)
+                )
+            ),
         )
 
         _clamp_result_page()
@@ -3545,18 +3580,31 @@ def show_search_files_screen(app):
         page_loading = search_state[
             "is_loading_page"
         ]
-        page_results = results
+        row_slots = []
 
-        row_boundaries = [
-            body_top
-            + round(
-                body_height * row_index
-                / rows_per_page
+        for slot_index in range(rows_per_page):
+            row_top = body_top + (slot_index * row_height)
+            row_bottom = row_top + row_height
+
+            if row_bottom > body_bottom:
+                break
+
+            row_slots.append(
+                (
+                    row_top,
+                    row_bottom,
+                )
             )
-            for row_index in range(
-                rows_per_page + 1
+
+        if not row_slots and body_bottom > body_top:
+            row_slots.append(
+                (
+                    body_top,
+                    body_bottom,
+                )
             )
-        ]
+
+        page_results = results[: len(row_slots)]
 
         page_file_ids = {
             int(result["file_id"])
@@ -3651,7 +3699,7 @@ def show_search_files_screen(app):
                 (body_top + body_bottom) / 2.0,
                 text=(
                     "검색어나 상세 조건을 입력한 뒤\n"
-                    "검색 버튼을 눌러 주세요."
+                    "Enter 키를 눌러 주세요."
                 ),
                 fill=SF_TEXT_PLACEHOLDER,
                 font=app._font(11),
@@ -3678,11 +3726,8 @@ def show_search_files_screen(app):
             filename_font = app._font(9, "bold")
 
             for local_index, result in enumerate(page_results):
-                row_top = row_boundaries[
+                row_top, row_bottom = row_slots[
                     local_index
-                ]
-                row_bottom = row_boundaries[
-                    local_index + 1
                 ]
                 row_center = (
                     row_top + row_bottom
@@ -3899,12 +3944,9 @@ def show_search_files_screen(app):
                         _toggle_result_checkbox(fid),
                 )
 
-        # Draw row separators after row backgrounds so that
-        # populated rows cannot cover the table grid.
-        for slot_index in range(rows_per_page):
-            slot_bottom = row_boundaries[
-                slot_index + 1
-            ]
+        # Draw separators only for rendered rows, ending at the last result.
+        for slot_index in range(len(page_results)):
+            slot_bottom = row_slots[slot_index][1]
 
             card_canvas.create_line(
                 table_x1,

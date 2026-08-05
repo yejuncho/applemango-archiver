@@ -90,6 +90,10 @@ from applemango_dms.ui.workplace_menu import (
     show_workspace_exit_screen as ui_show_workspace_exit_screen,
 )
 
+from applemango_dms.ui.workspace_sync import (
+    show_sync_workspace_screen as ui_show_sync_workspace_screen,
+)
+
 from applemango_dms.ui.save_files import (
     show_save_files_screen as ui_show_save_files_screen,
 )
@@ -471,6 +475,7 @@ class SequenceArchiverApp:
             "workspace_folder": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "folder.svg", 30, 30, "#2fa44f"),
             "workspace_file_save": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_save_blue.svg", 18, 18, None),
             "workspace_file_search": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "file_search_green.svg", 18, 18, None),
+            "workspace_sync": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "sync.svg", 18, 18, None),
             "workspace_exit": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "exit_red.svg", 18, 18, None),
             "workspace_storage": (config.PROJECT_ROOT / "assets" / "icons" / "workspace" / "storage.svg", 18, 18, None),
         }
@@ -863,6 +868,9 @@ class SequenceArchiverApp:
 
     def show_search_files_screen(self):
         return ui_show_search_files_screen(self)
+
+    def show_sync_workspace_screen(self):
+        return ui_show_sync_workspace_screen(self)
 
     def show_workspace_exit_screen(self):
         return ui_show_workspace_exit_screen(self)

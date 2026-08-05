@@ -61,6 +61,10 @@ def _get_workspace_nav_icon_map(app):
             "normal": app.ui_icon_photos.get("workspace_file_search") or _load_workspace_icon(app, "file_search_green", "file_search_green.svg"),
             "active": app.ui_icon_photos.get("file_search_white") or _load_workspace_icon(app, "file_search_white", "file_search_white.svg"),
         },
+        "sync": {
+            "normal": app.ui_icon_photos.get("workspace_sync") or _load_workspace_icon(app, "sync", "sync.svg"),
+            "active": app.ui_icon_photos.get("sync_white") or _load_workspace_icon(app, "sync_white", "sync_white.svg"),
+        },
         "exit": {
             "normal": app.ui_icon_photos.get("workspace_exit") or _load_workspace_icon(app, "exit_red", "exit_red.svg"),
             "active": app.ui_icon_photos.get("exit_white") or _load_workspace_icon(app, "exit_white", "exit_white.svg"),
@@ -148,6 +152,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     card_pad_x = 1
     card_height = 100
     card_gap_y = card_pad_x
+    nav_min_shell_height = (card_height * max(1, len(items))) + (card_gap_y * max(0, len(items) - 1)) + 12
 
     nav_top_shell = tk.Canvas(nav_section, bg=parent.cget("bg"), highlightthickness=0, bd=0)
     nav_top_shell.pack(side="top", fill="x", padx=card_pad_x, pady=(card_pad_x, 0))
@@ -157,7 +162,7 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
     def redraw_nav_top_shell(_event=None):
         nav_top_shell.delete("navpanel")
         width = max(170, nav_top_shell.winfo_width())
-        height = max(120, nav_top_shell.winfo_height())
+        height = max(nav_min_shell_height, nav_top_shell.winfo_height())
         app._smooth_rounded_rect(
             nav_top_shell,
             1,
@@ -478,6 +483,7 @@ def _workspace_sidebar_items(app):
     return [
         ("save", "\U0001F4E4", "파일 저장", "파일을 등록하고 문서 정보와\n함께 안전하게 보관해요.", app.show_save_files_screen, colors.PRIMARY),
         ("search", "\U0001F50D", "파일 검색", "저장된 파일을 빠르게\n찾고 열람하거나 관리해요.", app.show_search_files_screen, MENU_TEXT_PRIMARY),
+        ("sync", "\U0001F504", "워크스페이스 동기화", "동기화 안내 문구를\n여기에 작성해 주세요.", app.show_sync_workspace_screen, MENU_TEXT_PRIMARY),
         ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아가요.", app.show_workspace_exit_screen, colors.FAILED),
     ]
 
@@ -485,6 +491,7 @@ def _workspace_sidebar_icon_photos(app):
     return {
         "save": app.ui_icon_photos.get("workspace_file_save") or app.ui_icon_photos.get("file_save_blue"),
         "search": app.ui_icon_photos.get("workspace_file_search") or app.ui_icon_photos.get("file_search_green"),
+        "sync": app.ui_icon_photos.get("workspace_sync") or app.ui_icon_photos.get("sync"),
         "exit": app.ui_icon_photos.get("workspace_exit") or app.ui_icon_photos.get("exit_red"),
     }
 
