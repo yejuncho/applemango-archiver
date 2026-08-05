@@ -25,9 +25,6 @@ MENU_NAV_DEFAULT_TEXT = colors.TEXT_TINT
 MENU_STORAGE_BAR_BG = colors.PRIMARY
 MENU_STORAGE_USAGE_FILL = colors.PRIMARY
 
-MENU_EXIT_BUTTON_BG = colors.FAILED
-MENU_EXIT_BUTTON_ACTIVE_BG = colors.FAILED_HOVER
-
 def _directory_size_bytes(path_obj):
     root = Path(path_obj)
     if not root.exists():
@@ -65,9 +62,9 @@ def _get_workspace_nav_icon_map(app):
             "normal": app.ui_icon_photos.get("workspace_sync") or _load_workspace_icon(app, "sync", "sync.svg"),
             "active": app.ui_icon_photos.get("sync_white") or _load_workspace_icon(app, "sync_white", "sync_white.svg"),
         },
-        "exit": {
-            "normal": app.ui_icon_photos.get("workspace_exit") or _load_workspace_icon(app, "exit_red", "exit_red.svg"),
-            "active": app.ui_icon_photos.get("exit_white") or _load_workspace_icon(app, "exit_white", "exit_white.svg"),
+        "doc_type": {
+            "normal": app.ui_icon_photos.get("workspace_doc_type") or _load_workspace_icon(app, "doc_type", "doc_type.svg"),
+            "active": app.ui_icon_photos.get("doc_type_white") or _load_workspace_icon(app, "doc_type_white", "doc_type_white.svg"),
         },
     }
 
@@ -484,7 +481,7 @@ def _workspace_sidebar_items(app):
         ("save", "\U0001F4E4", "파일 저장", "파일을 등록하고 문서 정보와\n함께 안전하게 보관해요.", app.show_save_files_screen, colors.PRIMARY),
         ("search", "\U0001F50D", "파일 검색", "저장된 파일을 빠르게\n찾고 열람하거나 관리해요.", app.show_search_files_screen, MENU_TEXT_PRIMARY),
         ("sync", "\U0001F504", "워크스페이스 동기화", "동기화 안내 문구를\n여기에 작성해 주세요.", app.show_sync_workspace_screen, MENU_TEXT_PRIMARY),
-        ("exit", "\u21a9", "워크스페이스 나가기", "현재 워크스페이스를 나가고\n목록으로 돌아가요.", app.show_workspace_exit_screen, colors.FAILED),
+        ("doc_type", "\U0001F4C1", "문서 유형 관리", "문서 유형 관리 안내 문구를\n여기에 작성해 주세요.", app.show_document_type_management_screen, MENU_TEXT_PRIMARY),
     ]
 
 def _workspace_sidebar_icon_photos(app):
@@ -492,7 +489,7 @@ def _workspace_sidebar_icon_photos(app):
         "save": app.ui_icon_photos.get("workspace_file_save") or app.ui_icon_photos.get("file_save_blue"),
         "search": app.ui_icon_photos.get("workspace_file_search") or app.ui_icon_photos.get("file_search_green"),
         "sync": app.ui_icon_photos.get("workspace_sync") or app.ui_icon_photos.get("sync"),
-        "exit": app.ui_icon_photos.get("workspace_exit") or app.ui_icon_photos.get("exit_red"),
+        "doc_type": app.ui_icon_photos.get("workspace_doc_type") or app.ui_icon_photos.get("doc_type"),
     }
 
 def render_workspace_sidebar_nav(app, parent, active_key):
@@ -510,27 +507,3 @@ def show_main_workspace_menu(app):
         return
 
     app.show_save_files_screen()
-
-def show_workspace_exit_screen(app):
-    shell = app._create_workspace_shell()
-    app.root.title("애플망고 DMS - 워크스페이스 나가기")
-
-    render_workspace_sidebar_nav(app, shell["sidebar"], "exit")
-
-    outer = shell["content"]
-    app._build_workspace_page_header(outer, "워크스페이스 나가기", "현재 워크스페이스를 나가고 목록으로 돌아가요.")
-
-    action_row = tk.Frame(outer, bg=outer.cget("bg"))
-    action_row.pack(fill="x", padx=20, pady=(4, 0))
-    tk.Button(
-        action_row,
-        text="나가기",
-        width=14,
-        bg=MENU_EXIT_BUTTON_BG,
-        fg=MENU_TEXT_INVERSE,
-        activebackground=MENU_EXIT_BUTTON_ACTIVE_BG,
-        relief="flat",
-        bd=0,
-        cursor="hand2",
-        command=app.show_workspace_selection_screen,
-    ).pack(side="left")
