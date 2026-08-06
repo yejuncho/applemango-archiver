@@ -308,6 +308,233 @@ class DocumentTypeBackendTests(unittest.TestCase):
                 "미분류",
             )
 
+    def test_i_move_up_and_down_persists_for_active_list(self):
+        self.database.create_document_type(
+            self.workspace_id,
+            "Invoices",
+        )
+        reports = self.database.create_document_type(
+            self.workspace_id,
+            "Reports",
+        )
+        self.database.create_document_type(
+            self.workspace_id,
+            "Contracts",
+        )
+        dormant_one = self.database.create_document_type(
+            self.workspace_id,
+            "Dormant 1",
+        )
+        dormant_two = self.database.create_document_type(
+            self.workspace_id,
+            "Dormant 2",
+        )
+
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(dormant_one["id"]),
+        )
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(dormant_two["id"]),
+        )
+
+        reports_id = int(reports["id"])
+        ids_before = self._id_by_name()
+        inactive_before = self._inactive_names()
+
+        moved_up = self.database.move_document_type_up(
+            self.workspace_id,
+            reports_id,
+        )
+
+        self.assertEqual(
+            int(moved_up["id"]),
+            reports_id,
+        )
+
+        self.assertEqual(
+            self._active_names(),
+            [
+                "기타",
+                "Reports",
+                "Invoices",
+                "Contracts",
+            ],
+        )
+        self.assertEqual(
+            self._inactive_names(),
+            inactive_before,
+        )
+
+        moved_down = self.database.move_document_type_down(
+            self.workspace_id,
+            reports_id,
+        )
+
+        self.assertEqual(
+            int(moved_down["id"]),
+            reports_id,
+        )
+
+        self.assertEqual(
+            self._active_names(),
+            [
+                "기타",
+                "Invoices",
+                "Reports",
+                "Contracts",
+            ],
+        )
+        self.assertEqual(
+            self._inactive_names(),
+            inactive_before,
+        )
+        self.assertEqual(
+            self._id_by_name(),
+            ids_before,
+        )
+
+    def test_j_inactive_move_does_not_change_active_order(self):
+        self.database.create_document_type(
+            self.workspace_id,
+            "A",
+        )
+        b_row = self.database.create_document_type(
+            self.workspace_id,
+            "B",
+        )
+        c_row = self.database.create_document_type(
+            self.workspace_id,
+            "C",
+        )
+
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(b_row["id"]),
+        )
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(c_row["id"]),
+        )
+
+        self.assertEqual(
+            self._inactive_names(),
+            ["B", "C"],
+        )
+
+        active_before = self._active_names()
+        ids_before = self._id_by_name()
+
+        moved = self.database.move_document_type_down(
+            self.workspace_id,
+            int(b_row["id"]),
+        )
+
+        self.assertEqual(
+            int(moved["id"]),
+            int(b_row["id"]),
+        )
+
+        self.assertEqual(
+            self._inactive_names(),
+            ["C", "B"],
+        )
+        self.assertEqual(
+            self._active_names(),
+            active_before,
+        )
+        self.assertEqual(
+            self._id_by_name(),
+            ids_before,
+        )
+
+    def test_k_move_boundaries_are_noop_for_active_and_inactive(self):
+        active_row = self.database.create_document_type(
+            self.workspace_id,
+            "A",
+        )
+        b_row = self.database.create_document_type(
+            self.workspace_id,
+            "B",
+        )
+        c_row = self.database.create_document_type(
+            self.workspace_id,
+            "C",
+        )
+
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(b_row["id"]),
+        )
+        self.database.deactivate_document_type(
+            self.workspace_id,
+            int(c_row["id"]),
+        )
+
+        active_before = self._active_names()
+        inactive_before = self._inactive_names()
+
+        active_top_id = self._active_rows()[0]["id"]
+        active_bottom_id = self._active_rows()[-1]["id"]
+        inactive_top_id = [
+            row["id"]
+            for row in self._all_rows()
+            if not row["is_active"]
+        ][0]
+        inactive_bottom_id = [
+            row["id"]
+            for row in self._all_rows()
+            if not row["is_active"]
+        ][-1]
+
+        no_op_top_active = self.database.move_document_type_up(
+            self.workspace_id,
+            int(active_top_id),
+        )
+        no_op_bottom_active = self.database.move_document_type_down(
+            self.workspace_id,
+            int(active_bottom_id),
+        )
+        no_op_top_inactive = self.database.move_document_type_up(
+            self.workspace_id,
+            int(inactive_top_id),
+        )
+        no_op_bottom_inactive = self.database.move_document_type_down(
+            self.workspace_id,
+            int(inactive_bottom_id),
+        )
+
+        self.assertEqual(
+            int(no_op_top_active["id"]),
+            int(active_top_id),
+        )
+        self.assertEqual(
+            int(no_op_bottom_active["id"]),
+            int(active_bottom_id),
+        )
+        self.assertEqual(
+            int(no_op_top_inactive["id"]),
+            int(inactive_top_id),
+        )
+        self.assertEqual(
+            int(no_op_bottom_inactive["id"]),
+            int(inactive_bottom_id),
+        )
+
+        self.assertEqual(
+            self._active_names(),
+            active_before,
+        )
+        self.assertEqual(
+            self._inactive_names(),
+            inactive_before,
+        )
+        self.assertEqual(
+            int(active_row["id"]),
+            self._id_by_name()["A"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -60,6 +60,98 @@ SF_STATUS_PROCESSING = colors.PROCESSING
 SF_STATUS_FAILED = colors.FAILED_STRONG
 SF_STATUS_SUCCESS = colors.SUCCESS_STRONG
 SF_STATUS_STANDBY = colors.STANDBY
+SF_NUMBER_DESIGNATION_BG = getattr(
+    colors,
+    "NUMBER_DESIGNATION_BG",
+    colors.SURFACE_HOVER,
+)
+
+
+def _create_count_badge(
+    app,
+    parent,
+    *,
+    textvariable,
+    bg,
+):
+    badge_height = 28
+    badge_radius = 10
+    font_value = app._font(12, "bold")
+
+    canvas = tk.Canvas(
+        parent,
+        bg=bg,
+        highlightthickness=0,
+        bd=0,
+        height=badge_height,
+    )
+
+    def _render(*_args):
+        if not canvas.winfo_exists():
+            return
+
+        text_value = str(textvariable.get() or "")
+        text_width = tkfont.Font(font=font_value).measure(text_value)
+        badge_width = max(44, text_width + 20)
+
+        canvas.configure(
+            width=badge_width,
+            height=badge_height,
+        )
+        canvas.delete("count_badge")
+
+        app._smooth_rounded_rect(
+            canvas,
+            1,
+            1,
+            badge_width - 2,
+            badge_height - 2,
+            badge_radius,
+            fill=SF_NUMBER_DESIGNATION_BG,
+            outline=SF_NUMBER_DESIGNATION_BG,
+            width=1,
+            tags="count_badge",
+        )
+
+        canvas.create_text(
+            int(badge_width / 2),
+            int(badge_height / 2),
+            text=text_value,
+            font=font_value,
+            fill=SF_TEXT_MUTED,
+            tags="count_badge",
+        )
+
+    trace_id = textvariable.trace_add(
+        "write",
+        _render,
+    )
+
+    def _on_destroy(event):
+        if event.widget is not canvas:
+            return
+
+        try:
+            textvariable.trace_remove(
+                "write",
+                trace_id,
+            )
+        except Exception:
+            pass
+
+    canvas.bind(
+        "<Destroy>",
+        _on_destroy,
+        add="+",
+    )
+    canvas.bind(
+        "<Configure>",
+        _render,
+        add="+",
+    )
+
+    _render()
+    return canvas
 
 def show_save_files_screen(app):
     shell = app._create_workspace_shell()
@@ -76,8 +168,65 @@ def show_save_files_screen(app):
     selected_files = []
     selected_row_keys = set()
     row_metadata_state = {}
-    pending_count_var = tk.StringVar(value="업로드 대기 파일 (0)")
+    pending_count_var = tk.StringVar(value="0")
+    pending_title_text = "업로드 대기 파일"
+    pending_title_font = app._font(14, "bold")
+    pending_count_font = app._font(12, "bold")
+    count_badge = None
+    row1_title_slot = None
+    title_row_inner = None
     refresh_row3_rows = lambda: None
+
+    def _measure_count_badge_width(text_value):
+        badge_text = str(text_value or "")
+        badge_text_width = tkfont.Font(font=pending_count_font).measure(badge_text)
+        return max(44, badge_text_width + 20)
+
+    def _sync_row1_title_slot_width():
+        if row1_title_slot is None or title_row_inner is None:
+            return
+
+        try:
+            if not row1_title_slot.winfo_exists() or not title_row_inner.winfo_exists():
+                return
+
+            title_width = tkfont.Font(font=pending_title_font).measure(
+                pending_title_text
+            )
+            badge_visible = bool(
+                count_badge is not None and count_badge.winfo_manager()
+            )
+            badge_width = (
+                _measure_count_badge_width(pending_count_var.get())
+                if badge_visible
+                else 0
+            )
+            title_gap = 8 if badge_visible else 0
+            row1_title_slot.configure(
+                width=max(156, int(title_width + title_gap + badge_width + 12))
+            )
+        except Exception:
+            return
+
+    def _set_pending_count_display(value):
+        nonlocal count_badge
+
+        count_value = max(0, int(value))
+        pending_count_var.set(f"{count_value}개")
+
+        if count_badge is None:
+            _sync_row1_title_slot_width()
+            return
+
+        is_visible = bool(count_badge.winfo_manager())
+
+        if count_value > 0 and not is_visible:
+            count_badge.pack(side="left", padx=(8, 0))
+
+        elif count_value <= 0 and is_visible:
+            count_badge.pack_forget()
+
+        _sync_row1_title_slot_width()
 
     workspace_id = getattr(state, "active_workspace_id", None)
 
@@ -156,7 +305,7 @@ def show_save_files_screen(app):
             if item not in seen:
                 selected_files.append(item)
                 seen.add(item)
-        pending_count_var.set(f"업로드 대기 파일 ({len(selected_files)})")
+        _set_pending_count_display(len(selected_files))
         refresh_row3_rows()
 
     def add_folder_paths(folder_paths):
@@ -236,21 +385,21 @@ def show_save_files_screen(app):
         for removed_key in list(selected_row_keys):
             row_metadata_state.pop(removed_key, None)
         selected_row_keys.clear()
-        pending_count_var.set(f"업로드 대기 파일 ({len(selected_files)})")
+        _set_pending_count_display(len(selected_files))
         refresh_row3_rows()
 
     def clear_all_files():
         selected_files.clear()
         selected_row_keys.clear()
         row_metadata_state.clear()
-        pending_count_var.set("업로드 대기 파일 (0)")
+        _set_pending_count_display(0)
         refresh_row3_rows()
 
     def remove_row_item(row_key):
         selected_files[:] = [path for path in selected_files if path != row_key]
         selected_row_keys.discard(row_key)
         row_metadata_state.pop(row_key, None)
-        pending_count_var.set(f"업로드 대기 파일 ({len(selected_files)})")
+        _set_pending_count_display(len(selected_files))
         refresh_row3_rows()
 
     def set_row_upload_state(row_key, *, status_code=None, progress_ratio=None):
@@ -622,7 +771,7 @@ def show_save_files_screen(app):
         height=row1_window_height,
     )
 
-    row1_title_width = 180
+    row1_title_width = 156
     row1_frame.grid_rowconfigure(0, minsize=row1_window_height)
     row1_frame.grid_columnconfigure(0, minsize=row1_title_width, weight=0)
     row1_frame.grid_columnconfigure(1, weight=0)
@@ -634,15 +783,35 @@ def show_save_files_screen(app):
     row1_title_slot.grid(row=0, column=0, sticky="w")
     row1_title_slot.pack_propagate(False)
 
-    title_label = tk.Label(
+    title_row_inner = tk.Frame(
         row1_title_slot,
-        textvariable=pending_count_var,
         bg=row_colors[0],
-        fg=SF_TEXT_MAIN,
-        font=app._font(14, "bold"),
+        highlightthickness=0,
+        bd=0,
+    )
+    title_row_inner.place(
+        x=0,
+        rely=0.5,
         anchor="w",
     )
-    title_label.place(x=0, rely=0.5, anchor="w")
+
+    title_label = tk.Label(
+        title_row_inner,
+        text=pending_title_text,
+        bg=row_colors[0],
+        fg=SF_TEXT_MAIN,
+        font=pending_title_font,
+        anchor="w",
+    )
+    title_label.pack(side="left")
+
+    count_badge = _create_count_badge(
+        app,
+        title_row_inner,
+        textvariable=pending_count_var,
+        bg=row_colors[0],
+    )
+    _set_pending_count_display(len(selected_files))
 
     row1_icon_size = 22
     row1_icon_gap = 4
@@ -2475,7 +2644,7 @@ def show_save_files_screen(app):
             empty_canvas.create_text(
                 icon_center_x,
                 icon_center_y + max(52, (empty_cloud_icon_height // 2) + 18),
-                text="클라우드 아이콘을 눌러 파일을 추가할 수 있어요",
+                text="업로드 아이콘을 눌러 파일을 추가할 수 있어요",
                 fill=SF_TEXT_MUTED,
                 font=app._font(12),
                 anchor="center",

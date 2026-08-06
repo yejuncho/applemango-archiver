@@ -1,5 +1,6 @@
 import sqlite3
 import tkinter as tk
+import tkinter.font as tkfont
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from tkinter import TclError
@@ -32,6 +33,11 @@ SF_TEXT_PLACEHOLDER = colors.TEXT_PLACEHOLDER
 SF_PRIMARY = colors.PRIMARY
 SF_INPUT_IDLE_BORDER = colors.BORDER
 SF_INPUT_FOCUS_BORDER = colors.PRIMARY_PRESSED
+SF_NUMBER_DESIGNATION_BG = getattr(
+    colors,
+    "NUMBER_DESIGNATION_BG",
+    colors.SURFACE_HOVER,
+)
 
 SF_RESULTS_PER_PAGE = 7
 SF_FILTER_EXPANDED_ROW_REDUCTION = 3
@@ -80,7 +86,7 @@ def show_search_files_screen(app):
     right_card.grid(row=0, column=1, sticky="nsew")
 
     search_placeholder_text = "파일명, 문서 유형, 태그, 업로더 등으로 검색할 수 있어요."
-    search_result_count_var = tk.StringVar(value="검색 결과")
+    search_result_count_var = tk.StringVar(value="0건")
     search_var = tk.StringVar(value="")
     search_box_inset = 15
     # Horizontal insets for the two left cards.
@@ -538,7 +544,7 @@ def show_search_files_screen(app):
         _set_quick_button_state(None)
 
         search_result_count_var.set(
-            "검색 결과"
+            "0건"
         )
 
         _draw_results_table()
@@ -603,8 +609,7 @@ def show_search_files_screen(app):
             search_state["selected_file_id"] = None
 
         search_result_count_var.set(
-            f"검색 결과 "
-            f"({search_state['total_count']}건)"
+            f"{search_state['total_count']}건"
         )
 
         _clamp_result_page()
@@ -754,7 +759,7 @@ def show_search_files_screen(app):
             search_state["error"] = str(exc)
             _reset_search_selection()
 
-            search_result_count_var.set("검색 결과 (0건)")
+            search_result_count_var.set("0건")
 
             print("Search failed:", exc)
 
@@ -770,7 +775,7 @@ def show_search_files_screen(app):
             search_state["error"] = str(exc)
             _reset_search_selection()
 
-            search_result_count_var.set("검색 결과 (0건)")
+            search_result_count_var.set("0건")
 
             print("Unexpected search error:", exc)
 
@@ -1036,6 +1041,48 @@ def show_search_files_screen(app):
         canvas.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=border_width)
         canvas.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=border_width)
         canvas.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=border_width)
+
+    def _draw_count_badge(
+        canvas,
+        *,
+        left,
+        center_y,
+        text,
+    ):
+        badge_height = 28
+        badge_radius = 10
+        badge_font = app._font(12, "bold")
+        badge_text = str(text or "")
+        badge_text_width = tkfont.Font(font=badge_font).measure(badge_text)
+        badge_width = max(44, badge_text_width + 20)
+
+        x1 = int(left)
+        y1 = int(center_y - (badge_height / 2))
+        x2 = x1 + badge_width
+        y2 = y1 + badge_height
+
+        app._smooth_rounded_rect(
+            canvas,
+            x1,
+            y1,
+            x2,
+            y2,
+            badge_radius,
+            fill=SF_NUMBER_DESIGNATION_BG,
+            outline=SF_NUMBER_DESIGNATION_BG,
+            width=1,
+        )
+
+        canvas.create_text(
+            int((x1 + x2) / 2),
+            int(center_y),
+            text=badge_text,
+            fill=colors.TEXT_SECONDARY,
+            font=badge_font,
+            anchor="center",
+        )
+
+        return x2
 
     def _create_search_action_button(
         parent,
@@ -3373,19 +3420,47 @@ def show_search_files_screen(app):
             search_state["selected_file_ids"]
         )
 
-        title_text = search_result_count_var.get()
-
-        if selected_count:
-            title_text += f" · {selected_count}개 선택"
+        title_left = inner_x1 + 10
+        title_label_text = "검색 결과"
+        title_font = app._font(14, "bold")
 
         card_canvas.create_text(
-            inner_x1 + 10,
+            title_left,
             title_center_y,
-            text=title_text,
+            text=title_label_text,
             fill=SF_TEXT_MAIN,
-            font=app._font(14, "bold"),
+            font=title_font,
             anchor="w",
         )
+
+        title_label_width = tkfont.Font(font=title_font).measure(
+            title_label_text
+        )
+        show_result_count_badge = int(
+            search_state["total_count"] or 0
+        ) > 0
+        title_tail_x = (
+            title_left + title_label_width
+        )
+
+        if show_result_count_badge:
+            badge_right = _draw_count_badge(
+                card_canvas,
+                left=title_tail_x + 8,
+                center_y=title_center_y,
+                text=search_result_count_var.get(),
+            )
+            title_tail_x = badge_right
+
+        if selected_count:
+            card_canvas.create_text(
+                title_tail_x + 10,
+                title_center_y,
+                text=f"· {selected_count}개 선택",
+                fill=SF_TEXT_MAIN,
+                font=app._font(12, "bold"),
+                anchor="w",
+            )
 
         if search_state["is_loading_page"]:
             card_canvas.create_text(

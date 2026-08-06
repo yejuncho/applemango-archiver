@@ -1333,11 +1333,18 @@ class ArchiveDatabase:
             for row in rows
         ]
 
-    def reorder_document_types(
+    def reorder_document_type_group(
         self,
         workspace_id,
         ordered_document_type_ids,
+        *,
+        is_active,
     ):
+        if not isinstance(is_active, bool):
+            raise TypeError(
+                "is_active must be a boolean."
+            )
+
         if not isinstance(
             ordered_document_type_ids,
             (list, tuple),
@@ -1346,7 +1353,7 @@ class ArchiveDatabase:
                 "ordered_document_type_ids must be a list of IDs."
             )
 
-        normalized_document_type_ids = [
+        normalized_ids = [
             self._normalize_positive_int(
                 value,
                 "document_type_id",
@@ -1354,64 +1361,64 @@ class ArchiveDatabase:
             for value in ordered_document_type_ids
         ]
 
-        if len(set(normalized_document_type_ids)) != len(
-            normalized_document_type_ids
-        ):
+        if len(normalized_ids) != len(set(normalized_ids)):
             raise ValueError(
                 "Each document type ID must appear exactly once."
             )
 
         with self._connect() as conn:
-            normalized_workspace_id = self._require_active_workspace_with_conn(
-                conn,
-                workspace_id,
+            normalized_workspace_id = (
+                self._require_active_workspace_with_conn(
+                    conn,
+                    workspace_id,
+                )
             )
 
-            rows = conn.execute(
-                """
-                SELECT
-                    id,
-                    is_active,
-                    deleted_at
-                FROM document_types
-                WHERE workspace_id = ?;
-                """,
-                (normalized_workspace_id,),
-            ).fetchall()
+            if is_active:
+                rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM document_types
+                    WHERE workspace_id = ?
+                      AND is_active = 1
+                      AND deleted_at IS NULL
+                    ORDER BY
+                        sort_order,
+                        name COLLATE NOCASE,
+                        id;
+                    """,
+                    (normalized_workspace_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM document_types
+                    WHERE workspace_id = ?
+                      AND (
+                          is_active = 0
+                          OR deleted_at IS NOT NULL
+                      )
+                    ORDER BY
+                        sort_order,
+                        name COLLATE NOCASE,
+                        id;
+                    """,
+                    (normalized_workspace_id,),
+                ).fetchall()
 
-            workspace_document_type_ids = {
+            expected_ids = [
                 int(row["id"])
                 for row in rows
-            }
-            active_document_type_ids = [
-                int(row["id"])
-                for row in rows
-                if bool(row["is_active"])
-                and row["deleted_at"] is None
             ]
 
-            requested_id_set = set(
-                normalized_document_type_ids
-            )
-            unknown_ids = (
-                requested_id_set
-                - workspace_document_type_ids
-            )
-
-            if unknown_ids:
-                raise ValueError(
-                    "All document type IDs must belong to workspace."
-                )
-
-            active_id_set = set(active_document_type_ids)
-
             if (
-                requested_id_set != active_id_set
-                or len(normalized_document_type_ids)
-                != len(active_document_type_ids)
+                len(normalized_ids) != len(expected_ids)
+                or set(normalized_ids) != set(expected_ids)
             ):
                 raise ValueError(
-                    "Every active document type must appear exactly once."
+                    "Every document type in the selected status "
+                    "group must appear exactly once."
                 )
 
             conn.executemany(
@@ -1428,36 +1435,136 @@ class ArchiveDatabase:
                         document_type_id,
                     )
                     for index, document_type_id in enumerate(
-                        normalized_document_type_ids
+                        normalized_ids
                     )
                 ],
             )
 
-            refreshed_rows = conn.execute(
-                """
-                SELECT
-                    id,
-                    name,
-                    sort_order,
-                    created_at,
-                    is_active,
-                    deleted_at
-                FROM document_types
-                WHERE workspace_id = ?
-                  AND is_active = 1
-                  AND deleted_at IS NULL
-                ORDER BY
-                    sort_order,
-                    name COLLATE NOCASE,
-                    id;
-                """,
-                (normalized_workspace_id,),
-            ).fetchall()
+        return self.list_document_types(
+            normalized_workspace_id,
+            include_inactive=True,
+        )
 
-        return [
-            self._document_type_row_to_dict(row)
-            for row in refreshed_rows
+    def reorder_document_types(
+        self,
+        workspace_id,
+        ordered_document_type_ids,
+    ):
+        return self.reorder_document_type_group(
+            workspace_id,
+            ordered_document_type_ids,
+            is_active=True,
+        )
+
+    def _move_document_type(
+        self,
+        workspace_id,
+        document_type_id,
+        *,
+        direction,
+    ):
+        if direction not in {"up", "down"}:
+            raise ValueError(
+                "direction must be 'up' or 'down'."
+            )
+
+        normalized_document_type_id = (
+            self._normalize_positive_int(
+                document_type_id,
+                "document_type_id",
+            )
+        )
+
+        record = self.get_document_type(
+            workspace_id,
+            normalized_document_type_id,
+        )
+
+        if record is None:
+            raise LookupError(
+                "Document type not found."
+            )
+
+        is_active = bool(record["is_active"])
+
+        rows = self.list_document_types(
+            workspace_id,
+            include_inactive=True,
+        )
+
+        group = [
+            row
+            for row in rows
+            if bool(row["is_active"]) == is_active
         ]
+
+        ordered_ids = [
+            int(row["id"])
+            for row in group
+        ]
+
+        try:
+            current_index = ordered_ids.index(
+                normalized_document_type_id
+            )
+        except ValueError as exc:
+            raise LookupError(
+                "Document type was not found in its status group."
+            ) from exc
+
+        target_index = (
+            current_index - 1
+            if direction == "up"
+            else current_index + 1
+        )
+
+        if (
+            target_index < 0
+            or target_index >= len(ordered_ids)
+        ):
+            return record
+
+        ordered_ids[
+            current_index
+        ], ordered_ids[
+            target_index
+        ] = (
+            ordered_ids[target_index],
+            ordered_ids[current_index],
+        )
+
+        self.reorder_document_type_group(
+            workspace_id,
+            ordered_ids,
+            is_active=is_active,
+        )
+
+        return self.get_document_type(
+            workspace_id,
+            normalized_document_type_id,
+        )
+
+    def move_document_type_up(
+        self,
+        workspace_id,
+        document_type_id,
+    ):
+        return self._move_document_type(
+            workspace_id,
+            document_type_id,
+            direction="up",
+        )
+
+    def move_document_type_down(
+        self,
+        workspace_id,
+        document_type_id,
+    ):
+        return self._move_document_type(
+            workspace_id,
+            document_type_id,
+            direction="down",
+        )
 
     def designate_workspace(
         self,
