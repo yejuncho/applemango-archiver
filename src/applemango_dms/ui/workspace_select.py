@@ -2,10 +2,8 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 
-import applemango_dms.config as config
 import applemango_dms.state as state
 
-from applemango_dms.services.nas import discover_server_shares
 from applemango_dms.ui.widgets import WorkspaceStack
 from applemango_dms.ui.header_controls import build_header_controls
 from applemango_dms.ui import colors
@@ -22,6 +20,7 @@ def show_workspace_selection_screen(app):
     if state.active_workspace_drive and app.workspace_drive_mapped_by_app:
         app.workspace_manager.unmap_drive(state.active_workspace_drive)
     state.active_workspace = ""
+    state.active_workspace_id = None
     state.active_workspace_drive = ""
     app.workspace_drive_mapped_by_app = False
 
@@ -30,15 +29,30 @@ def show_workspace_selection_screen(app):
     app.clear_screen()
     app.root.configure(bg=WS_BG)
 
-    if state.is_demo_mode:
-        try:
-            shares = app._load_demo_workspace_names()
-        except FileNotFoundError as exc:
-            messagebox.showerror("데모 모드", str(exc), parent=app.root)
-            app.show_login_screen()
-            return
-    else:
-        shares = discover_server_shares(config.default_server_name)
+    try:
+        selectable_rows = (
+            app.get_selectable_workspace_rows()
+        )
+    except Exception as exc:
+        messagebox.showerror(
+            "워크스페이스",
+            (
+                "사용 가능한 워크스페이스 목록을 "
+                f"불러오지 못했습니다.\n오류: {exc}"
+            ),
+            parent=app.root,
+        )
+        selectable_rows = []
+
+    shares = [
+        row["name"]
+        for row in selectable_rows
+    ]
+
+    selectable_by_name = {
+        str(row["name"]).casefold(): row
+        for row in selectable_rows
+    }
 
     bg = tk.Canvas(app.root, bg=WS_BG, highlightthickness=0, bd=0)
     bg.pack(fill="both", expand=True)
@@ -104,15 +118,96 @@ def show_workspace_selection_screen(app):
     stack_canvas.pack(side="left", fill="both", expand=True, padx=(0, 2), pady=(2, 0))
 
     def enter_workspace(selected):
+        selected_name = str(
+            selected or ""
+        ).strip()
+
+        workspace_row = selectable_by_name.get(
+            selected_name.casefold()
+        )
+
+        if workspace_row is None:
+            messagebox.showerror(
+                "워크스페이스",
+                (
+                    "선택한 워크스페이스는 더 이상 "
+                    "사용할 수 없습니다. 목록을 다시 열어 주세요."
+                ),
+                parent=app.root,
+            )
+            return
+
+        workspace_name = workspace_row["name"]
+        workspace_id = workspace_row["workspace_id"]
+
+        try:
+            current_row = (
+                app.get_selectable_workspace_by_name(
+                    workspace_name
+                )
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "워크스페이스",
+                (
+                    "워크스페이스 상태를 확인하지 "
+                    f"못했습니다.\n오류: {exc}"
+                ),
+                parent=app.root,
+            )
+            return
+
+        if (
+            current_row is None
+            or int(current_row["workspace_id"])
+            != int(workspace_id)
+        ):
+            messagebox.showerror(
+                "워크스페이스",
+                (
+                    "선택한 워크스페이스는 더 이상 "
+                    "사용할 수 없습니다. 화면을 다시 "
+                    "열어 주세요."
+                ),
+                parent=app.root,
+            )
+            return
+
+        workspace_name = current_row["name"]
+        workspace_id = current_row["workspace_id"]
+
         try:
             if state.is_demo_mode:
-                app.set_workspace(selected, "", False)
+                app.set_workspace(
+                    workspace_name,
+                    "",
+                    False,
+                    workspace_id=workspace_id,
+                )
             else:
-                drive, mapped_by_app, err = app.workspace_manager.map_workspace(selected, state.session_username, state.session_password)
+                drive, mapped_by_app, err = (
+                    app.workspace_manager.map_workspace(
+                        workspace_name,
+                        state.session_username,
+                        state.session_password,
+                    )
+                )
                 if not drive:
-                    messagebox.showerror("워크스페이스", f"워크스페이스 드라이브 매핑에 실패했습니다:\n{err}", parent=app.root)
+                    messagebox.showerror(
+                        "워크스페이스",
+                        (
+                            "워크스페이스 드라이브 매핑에 "
+                            f"실패했습니다:\n{err}"
+                        ),
+                        parent=app.root,
+                    )
                     return
-                app.set_workspace(selected, drive, mapped_by_app)
+                app.set_workspace(
+                    workspace_name,
+                    drive,
+                    mapped_by_app,
+                    workspace_id=workspace_id,
+                )
         except Exception as exc:
             messagebox.showerror("워크스페이스", f"워크스페이스 초기화에 실패했습니다:\n{exc}", parent=app.root)
             return
@@ -121,7 +216,10 @@ def show_workspace_selection_screen(app):
     if not shares:
         empty_label = tk.Label(
             stack_surface,
-            text="선택 가능한 워크스페이스가 없습니다.",
+            text=(
+                "사용하도록 지정된 워크스페이스가 없습니다.\n"
+                "설정에서 워크스페이스를 추가해 주세요."
+            ),
             bg=WS_CARD_BG,
             fg=WS_TEXT_SECONDARY,
             font=app._font(11),

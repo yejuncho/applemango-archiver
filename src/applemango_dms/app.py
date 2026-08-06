@@ -227,8 +227,22 @@ class SequenceArchiverApp:
     def _build_workspace_metadata(self, workspace_name):
         fs_stats = self._collect_workspace_filesystem_stats(workspace_name)
         try:
-            db_count = self.db.count_files_by_workspace(workspace_name)
-            file_count = db_count
+            workspace_row = (
+                self.db.get_workspace_by_name(
+                    workspace_name
+                )
+            )
+
+            if workspace_row is None:
+                raise LookupError(
+                    "Workspace is not registered."
+                )
+
+            file_count = (
+                self.db.count_files_by_workspace(
+                    workspace_row["id"]
+                )
+            )
         except Exception:
             file_count = fs_stats["fs_file_count"]
 
@@ -674,10 +688,6 @@ class SequenceArchiverApp:
 
         return root
 
-    def _load_demo_workspace_names(self):
-        root = self._ensure_demo_workspace_root()
-        return sorted([child.name for child in root.iterdir() if child.is_dir()])
-
     def discover_workspace_candidates(self):
         """
         Return normalized NAS or demo folder candidates for workspace
@@ -724,6 +734,56 @@ class SequenceArchiverApp:
             discovered,
             registered,
         )
+
+    def get_selectable_workspace_rows(self):
+        """
+        Return active, designated, currently discoverable workspaces
+        for the normal workspace-selection screen.
+
+        This method is read-only.
+        """
+        rows = self.get_workspace_designation_rows()
+
+        return [
+            row
+            for row in rows
+            if (
+                row.get("is_designated")
+                and row.get("is_active")
+                and row.get("is_discovered")
+                and row.get("is_available")
+            )
+        ]
+
+    def get_selectable_workspace_by_name(
+        self,
+        workspace_name,
+    ):
+        normalized_name = str(
+            workspace_name or ""
+        ).strip()
+
+        if not normalized_name:
+            raise ValueError(
+                "Workspace name is required."
+            )
+
+        matches = [
+            row
+            for row in self.get_selectable_workspace_rows()
+            if str(row["name"]).casefold()
+            == normalized_name.casefold()
+        ]
+
+        if not matches:
+            return None
+
+        if len(matches) > 1:
+            raise RuntimeError(
+                "Multiple selectable workspaces use the same name."
+            )
+
+        return matches[0]
 
     def designate_workspace_candidate(
         self,
@@ -790,11 +850,78 @@ class SequenceArchiverApp:
 
         return workspace
 
-    def set_workspace(self, workspace, drive_letter, mapped_by_app):
-        state.active_workspace = workspace
-        state.active_workspace_drive = drive_letter
-        self.workspace_drive_mapped_by_app = mapped_by_app
-        state.active_workspace_id = self._ensure_workspace_context(workspace)
+    def set_workspace(
+        self,
+        workspace,
+        drive_letter,
+        mapped_by_app,
+        *,
+        workspace_id,
+    ):
+        """
+        Activate an existing designated workspace.
+
+        Workspace entry never creates, designates, or reactivates a
+        workspace database record.
+        """
+        if self.db is None:
+            raise RuntimeError(
+                "Database is not initialized."
+            )
+
+        normalized_workspace = str(
+            workspace or ""
+        ).strip()
+
+        if not normalized_workspace:
+            raise ValueError(
+                "Workspace name is required."
+            )
+
+        try:
+            resolved_workspace_id = int(
+                workspace_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "workspace_id must be an integer."
+            ) from exc
+
+        if resolved_workspace_id <= 0:
+            raise ValueError(
+                "workspace_id must be greater than zero."
+            )
+
+        workspace_row = self.db.get_workspace_by_id(
+            resolved_workspace_id,
+            require_active=True,
+        )
+
+        if workspace_row is None:
+            raise LookupError(
+                "Active designated workspace not found."
+            )
+
+        if (
+            str(workspace_row["name"]).casefold()
+            != normalized_workspace.casefold()
+        ):
+            raise ValueError(
+                "Workspace ID and name do not match."
+            )
+
+        state.active_workspace = (
+            normalized_workspace
+        )
+        state.active_workspace_id = (
+            resolved_workspace_id
+        )
+        state.active_workspace_drive = (
+            drive_letter
+        )
+        self.workspace_drive_mapped_by_app = bool(
+            mapped_by_app
+        )
 
     def clear_workspace(self, unmap_if_needed=False):
 
@@ -838,72 +965,43 @@ class SequenceArchiverApp:
             return Path(config.DEMO_DB_PATH)
         return Path(config.archive_db_path)
 
-    def _resolve_workspace_share_path(self, workspace_name):
-        normalized_name = str(workspace_name or "").strip()
-        if not normalized_name:
-            raise ValueError("Workspace name is required.")
-
-        if state.is_demo_mode:
-            return self._ensure_demo_workspace_root() / normalized_name
-
-        return Path(fr"{config.default_server_name}\{normalized_name}")
-
-    def _ensure_workspace_context(self, workspace_name):
-        if self.db is None:
-            raise RuntimeError("Database is not initialized.")
-
-        share_path = self._resolve_workspace_share_path(workspace_name)
-        return self.db.ensure_workspace(
-            workspace_name,
-            share_path,
-            config.DEFAULT_DOCUMENT_TYPES,
-        )
-
-    def _initialize_demo_data(self):
-        root = self._ensure_demo_workspace_root()
-        workspace_names = sorted([child.name for child in root.iterdir() if child.is_dir()])
-        for workspace_name in workspace_names:
-            self.db.ensure_workspace(
-                workspace_name,
-                root / workspace_name,
-                config.DEFAULT_DOCUMENT_TYPES,
-            )
-
-        return True
-
     def ensure_database_ready(self):
         target_path = self._resolve_archive_db_path()
-        current_path = Path(self.db.db_path) if self.db is not None else None
+
+        current_path = (
+            Path(self.db.db_path)
+            if self.db is not None
+            else None
+        )
 
         if state.is_demo_mode:
             try:
                 self._ensure_demo_workspace_root()
             except Exception as exc:
-                messagebox.showerror("데이터베이스 오류", str(exc), parent=self.root)
+                messagebox.showerror(
+                    "데이터베이스 오류",
+                    str(exc),
+                    parent=self.root,
+                )
                 return False
 
         if current_path == target_path:
-            if state.is_demo_mode:
-                try:
-                    return self._initialize_demo_data()
-                except Exception as exc:
-                    messagebox.showerror(
-                        "데이터베이스 오류",
-                        f"데모 데이터 초기화에 실패했습니다.\n오류: {exc}",
-                        parent=self.root,
-                    )
-                    return False
             return True
 
         try:
-            self.db = ArchiveDatabase(target_path)
-            if state.is_demo_mode:
-                self._initialize_demo_data()
+            self.db = ArchiveDatabase(
+                target_path
+            )
             return True
+
         except Exception as exc:
             messagebox.showerror(
                 "데이터베이스 오류",
-                f"데이터베이스 파일을 준비하지 못했습니다.\n경로: {target_path}\n오류: {exc}",
+                (
+                    "데이터베이스 파일을 준비하지 "
+                    f"못했습니다.\n경로: {target_path}\n"
+                    f"오류: {exc}"
+                ),
                 parent=self.root,
             )
             return False

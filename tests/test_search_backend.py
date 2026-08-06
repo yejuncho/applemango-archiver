@@ -19,26 +19,41 @@ class SearchBackendTests(unittest.TestCase):
             self.root / "archive.db"
         )
 
-        self.workspace_one = self.database.ensure_workspace(
-            "Workspace One",
-            self.share_one,
-            ["Invoice", "Report"],
+        self.workspace_one = int(
+            self.database.designate_workspace(
+                "Workspace One",
+                self.share_one,
+            )["id"]
         )
-        self.workspace_two = self.database.ensure_workspace(
-            "Workspace Two",
-            self.share_two,
-            ["Invoice"],
+        self.workspace_two = int(
+            self.database.designate_workspace(
+                "Workspace Two",
+                self.share_two,
+            )["id"]
+        )
+
+        self.database.create_document_type(
+            self.workspace_one,
+            "Invoice",
+        )
+        self.database.create_document_type(
+            self.workspace_one,
+            "Report",
+        )
+        self.database.create_document_type(
+            self.workspace_two,
+            "Invoice",
         )
 
         self.types_one = {
-            row["name"]: row["id"]
-            for row in self.database.get_document_types(
+            row["name"]: int(row["id"])
+            for row in self.database.list_document_types(
                 self.workspace_one
             )
         }
         self.types_two = {
-            row["name"]: row["id"]
-            for row in self.database.get_document_types(
+            row["name"]: int(row["id"])
+            for row in self.database.list_document_types(
                 self.workspace_two
             )
         }

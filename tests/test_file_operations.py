@@ -21,17 +21,16 @@ class FileOperationsTests(unittest.TestCase):
         self.database = ArchiveDatabase(
             self.root / "archive.db"
         )
-        self.workspace_id = (
-            self.database.ensure_workspace(
-                "Test Workspace",
-                self.share_path,
-                ["Invoice"],
-            )
+        workspace_row = self.database.designate_workspace(
+            "Test Workspace",
+            self.share_path,
         )
-        self.document_type_id = (
-            self.database.get_document_types(
-                self.workspace_id
-            )[0]["id"]
+        self.workspace_id = int(workspace_row["id"])
+        self.document_type_id = int(
+            self.database.create_document_type(
+                self.workspace_id,
+                "Invoice",
+            )["id"]
         )
 
         self.service = FileOperationsService(

@@ -7,6 +7,12 @@ import applemango_dms.state as state
 
 from applemango_dms.services.auth import clear_saved_credentials
 from applemango_dms.services.nas import get_mapped_network_drives
+from applemango_dms.services.workspace_designation import (
+    WORKSPACE_STATUS_ACTIVE,
+    WORKSPACE_STATUS_AVAILABLE,
+    WORKSPACE_STATUS_INACTIVE,
+    WORKSPACE_STATUS_UNAVAILABLE,
+)
 from applemango_dms.ui import colors
 from applemango_dms.utils.images import load_svg_photo
 from applemango_dms.utils.windows import apply_window_icon
@@ -31,6 +37,70 @@ SETTINGS_WINDOW_HEIGHT = 520
 SETTINGS_WINDOW_MIN_WIDTH = 380
 SETTINGS_WINDOW_MIN_HEIGHT = 520
 SETTINGS_ROW_SIDE_PAD = 28
+
+WORKSPACE_DESIGNATION_WINDOW_WIDTH = 880
+WORKSPACE_DESIGNATION_WINDOW_HEIGHT = 560
+WORKSPACE_DESIGNATION_MIN_WIDTH = 760
+WORKSPACE_DESIGNATION_MIN_HEIGHT = 460
+
+WORKSPACE_STATUS_BADGE_STYLES = {
+    WORKSPACE_STATUS_ACTIVE: {
+        "text": "사용 중",
+        "fg": "#1E7A35",
+        "bg": "#EAF7EC",
+    },
+    WORKSPACE_STATUS_AVAILABLE: {
+        "text": "사용 안 함",
+        "fg": "#556070",
+        "bg": "#F1F3F7",
+    },
+    WORKSPACE_STATUS_INACTIVE: {
+        "text": "사용 해제",
+        "fg": "#9A5B12",
+        "bg": "#FFF2E4",
+    },
+    WORKSPACE_STATUS_UNAVAILABLE: {
+        "text": "연결 확인 필요",
+        "fg": "#B42318",
+        "bg": "#FDECEC",
+    },
+}
+
+
+def _workspace_status_badge_style(status):
+    normalized = str(status or "").strip().lower()
+    return WORKSPACE_STATUS_BADGE_STYLES.get(
+        normalized,
+        {
+            "text": "상태 알 수 없음",
+            "fg": "#556070",
+            "bg": "#F1F3F7",
+        },
+    )
+
+
+def _workspace_action_from_row(row):
+    status = str(row.get("status") or "").strip().lower()
+
+    if status == WORKSPACE_STATUS_AVAILABLE:
+        return {
+            "label": "추가",
+            "action": "designate",
+        }
+
+    if status == WORKSPACE_STATUS_ACTIVE:
+        return {
+            "label": "사용 해제",
+            "action": "deactivate",
+        }
+
+    if status == WORKSPACE_STATUS_INACTIVE:
+        return {
+            "label": "다시 사용",
+            "action": "reactivate",
+        }
+
+    return None
 
 
 def _center_toplevel_to_parent(parent_win, child_win):
@@ -218,9 +288,343 @@ def show_account_info_window(root):
 
 
 def show_workspace_designation_window(app, parent_win=None):
-    _ = app
     parent = parent_win if parent_win is not None else getattr(app, "root", app)
-    show_placeholder(parent, "워크스페이스 설정", "워크스페이스 지정 화면은 다음 백엔드 단계에서 연결될 예정이에요.")
+
+    existing = getattr(app, "_workspace_designation_window", None)
+    if existing is not None and existing.winfo_exists():
+        existing.deiconify()
+        existing.lift()
+        existing.focus_force()
+        return
+
+    win = tk.Toplevel(parent)
+    apply_window_icon(win)
+    win.title("워크스페이스 설정")
+    win.geometry(
+        f"{WORKSPACE_DESIGNATION_WINDOW_WIDTH}x{WORKSPACE_DESIGNATION_WINDOW_HEIGHT}"
+    )
+    win.minsize(
+        WORKSPACE_DESIGNATION_MIN_WIDTH,
+        WORKSPACE_DESIGNATION_MIN_HEIGHT,
+    )
+    win.configure(bg=SETTINGS_BG)
+    win.transient(parent)
+
+    app._workspace_designation_window = win
+
+    def _cleanup_window(event):
+        if event.widget is not win:
+            return
+        if getattr(app, "_workspace_designation_window", None) is win:
+            app._workspace_designation_window = None
+
+    win.bind("<Destroy>", _cleanup_window, add="+")
+
+    container = tk.Frame(
+        win,
+        bg=SETTINGS_BG,
+        padx=18,
+        pady=18,
+        highlightthickness=0,
+        bd=0,
+    )
+    container.pack(fill="both", expand=True)
+
+    title_frame = tk.Frame(container, bg=SETTINGS_BG, highlightthickness=0, bd=0)
+    title_frame.pack(fill="x")
+
+    tk.Label(
+        title_frame,
+        text="워크스페이스 지정 관리",
+        font=app._font(15, "bold"),
+        fg=SETTINGS_TEXT_EMPHASIS,
+        bg=SETTINGS_BG,
+        anchor="w",
+    ).pack(fill="x")
+
+    tk.Label(
+        title_frame,
+        text=(
+            "워크스페이스 발견 상태와 지정 상태를 함께 확인하고 "
+            "즉시 추가/해제/재사용할 수 있습니다."
+        ),
+        font=app._font(10),
+        fg=SETTINGS_TEXT_SECONDARY,
+        bg=SETTINGS_BG,
+        anchor="w",
+    ).pack(fill="x", pady=(6, 0))
+
+    table_card = tk.Frame(
+        container,
+        bg=SETTINGS_CARD_BG,
+        highlightbackground=SETTINGS_CARD_BORDER,
+        highlightthickness=1,
+        bd=0,
+    )
+    table_card.pack(fill="both", expand=True, pady=(14, 12))
+
+    header_row = tk.Frame(table_card, bg=SETTINGS_CARD_BG, padx=14, pady=10)
+    header_row.pack(fill="x")
+    header_row.grid_columnconfigure(0, weight=7)
+    header_row.grid_columnconfigure(1, weight=2)
+    header_row.grid_columnconfigure(2, weight=2)
+
+    tk.Label(
+        header_row,
+        text="워크스페이스",
+        bg=SETTINGS_CARD_BG,
+        fg=SETTINGS_TEXT_SECONDARY,
+        font=app._font(10, "bold"),
+        anchor="w",
+    ).grid(row=0, column=0, sticky="w")
+
+    tk.Label(
+        header_row,
+        text="상태",
+        bg=SETTINGS_CARD_BG,
+        fg=SETTINGS_TEXT_SECONDARY,
+        font=app._font(10, "bold"),
+        anchor="w",
+    ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+    tk.Label(
+        header_row,
+        text="작업",
+        bg=SETTINGS_CARD_BG,
+        fg=SETTINGS_TEXT_SECONDARY,
+        font=app._font(10, "bold"),
+        anchor="w",
+    ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+    tk.Frame(
+        table_card,
+        bg=SETTINGS_ROW_BORDER,
+        height=1,
+        highlightthickness=0,
+        bd=0,
+    ).pack(fill="x")
+
+    rows_shell = tk.Frame(table_card, bg=SETTINGS_CARD_BG, highlightthickness=0, bd=0)
+    rows_shell.pack(fill="both", expand=True)
+
+    rows_canvas = tk.Canvas(
+        rows_shell,
+        bg=SETTINGS_CARD_BG,
+        highlightthickness=0,
+        bd=0,
+        relief="flat",
+    )
+    rows_canvas.pack(side="left", fill="both", expand=True)
+
+    rows_scroll = ttk.Scrollbar(
+        rows_shell,
+        orient="vertical",
+        command=rows_canvas.yview,
+    )
+    rows_scroll.pack(side="right", fill="y")
+    rows_canvas.configure(yscrollcommand=rows_scroll.set)
+
+    rows_body = tk.Frame(rows_canvas, bg=SETTINGS_CARD_BG, highlightthickness=0, bd=0)
+    rows_body_id = rows_canvas.create_window(0, 0, window=rows_body, anchor="nw")
+
+    footer_row = tk.Frame(container, bg=SETTINGS_BG, highlightthickness=0, bd=0)
+    footer_row.pack(fill="x")
+
+    status_text = tk.StringVar(value="")
+    tk.Label(
+        footer_row,
+        textvariable=status_text,
+        bg=SETTINGS_BG,
+        fg=SETTINGS_TEXT_SECONDARY,
+        font=app._font(9),
+        anchor="w",
+    ).pack(side="left")
+
+    tk.Button(
+        footer_row,
+        text="닫기",
+        width=12,
+        bg="#d9d9d9",
+        activebackground="#c0c0c0",
+        relief="flat",
+        bd=0,
+        highlightthickness=0,
+        cursor="hand2",
+        command=win.destroy,
+    ).pack(side="right")
+
+    def _sync_rows_scroll_region(_event=None):
+        rows_canvas.configure(scrollregion=rows_canvas.bbox("all"))
+
+    def _sync_rows_width(event):
+        rows_canvas.itemconfigure(rows_body_id, width=event.width)
+
+    rows_body.bind("<Configure>", _sync_rows_scroll_region, add="+")
+    rows_canvas.bind("<Configure>", _sync_rows_width, add="+")
+
+    def _refresh_status_line(row_count):
+        status_text.set(f"총 {row_count}개 워크스페이스")
+
+    def _perform_workspace_action(row, action_name):
+        try:
+            if action_name == "designate":
+                app.designate_workspace_candidate(
+                    row["name"],
+                    row["share_path"],
+                )
+
+            elif action_name == "deactivate":
+                app.deactivate_designated_workspace(
+                    row["workspace_id"]
+                )
+
+            elif action_name == "reactivate":
+                app.reactivate_designated_workspace(
+                    row["workspace_id"],
+                    share_path=(
+                        row["share_path"]
+                        if row.get("is_discovered")
+                        else None
+                    ),
+                )
+
+            else:
+                return
+
+        except Exception as exc:
+            messagebox.showerror(
+                "워크스페이스 설정",
+                f"작업을 완료하지 못했습니다.\n오류: {exc}",
+                parent=win,
+            )
+        finally:
+            _load_rows()
+
+    def _render_rows(rows):
+        for child in rows_body.winfo_children():
+            child.destroy()
+
+        if not rows:
+            tk.Label(
+                rows_body,
+                text="표시할 워크스페이스가 없습니다.",
+                bg=SETTINGS_CARD_BG,
+                fg=SETTINGS_TEXT_SECONDARY,
+                font=app._font(10),
+                anchor="w",
+                padx=14,
+                pady=18,
+            ).pack(fill="x")
+            _refresh_status_line(0)
+            return
+
+        for idx, row in enumerate(rows):
+            row_bg = SETTINGS_CARD_BG if idx % 2 == 0 else SETTINGS_ROW_BG
+
+            item = tk.Frame(
+                rows_body,
+                bg=row_bg,
+                padx=14,
+                pady=10,
+                highlightthickness=0,
+                bd=0,
+            )
+            item.pack(fill="x")
+            item.grid_columnconfigure(0, weight=7)
+            item.grid_columnconfigure(1, weight=2)
+            item.grid_columnconfigure(2, weight=2)
+
+            workspace_cell = tk.Frame(item, bg=row_bg, highlightthickness=0, bd=0)
+            workspace_cell.grid(row=0, column=0, sticky="ew")
+
+            tk.Label(
+                workspace_cell,
+                text=str(row.get("name") or ""),
+                bg=row_bg,
+                fg=SETTINGS_TEXT_PRIMARY,
+                font=app._font(10, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+
+            path_text = str(row.get("share_path") or "")
+            source_text = "NAS" if str(row.get("source") or "").lower() == "nas" else "DEMO"
+            tk.Label(
+                workspace_cell,
+                text=f"{source_text} | {path_text}",
+                bg=row_bg,
+                fg=SETTINGS_TEXT_SECONDARY,
+                font=app._font(9),
+                anchor="w",
+            ).pack(fill="x", pady=(3, 0))
+
+            badge_style = _workspace_status_badge_style(
+                row.get("status")
+            )
+            tk.Label(
+                item,
+                text=badge_style["text"],
+                bg=badge_style["bg"],
+                fg=badge_style["fg"],
+                font=app._font(9, "bold"),
+                padx=10,
+                pady=4,
+            ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+            action_spec = _workspace_action_from_row(row)
+            if action_spec is None:
+                tk.Label(
+                    item,
+                    text="-",
+                    bg=row_bg,
+                    fg=SETTINGS_TEXT_SECONDARY,
+                    font=app._font(10),
+                    anchor="w",
+                ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+            else:
+                tk.Button(
+                    item,
+                    text=action_spec["label"],
+                    command=lambda r=row, a=action_spec["action"]: _perform_workspace_action(r, a),
+                    width=12,
+                    bg="#e6edf7",
+                    activebackground="#d8e6f7",
+                    fg="#1f2d3d",
+                    relief="flat",
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="hand2",
+                ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+            if idx < len(rows) - 1:
+                tk.Frame(
+                    rows_body,
+                    bg=SETTINGS_ROW_BORDER,
+                    height=1,
+                    highlightthickness=0,
+                    bd=0,
+                ).pack(fill="x")
+
+        _refresh_status_line(len(rows))
+        rows_canvas.yview_moveto(0.0)
+
+    def _load_rows():
+        try:
+            rows = app.get_workspace_designation_rows()
+        except Exception as exc:
+            messagebox.showerror(
+                "워크스페이스 설정",
+                f"워크스페이스 목록을 불러오지 못했습니다.\n오류: {exc}",
+                parent=win,
+            )
+            _render_rows([])
+            return
+
+        _render_rows(rows)
+
+    _load_rows()
+
+    win.update_idletasks()
+    _center_toplevel_to_parent(parent, win)
 
 def show_mapped_drives_window(root):
     mapped_entries = get_mapped_network_drives()

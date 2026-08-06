@@ -17,6 +17,12 @@ class ArchiveDatabase:
     RECONCILIATION_UPLOADER_NAME = "시스템: NAS 동기화"
 
     WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME = "기타"
+    RESERVED_DOCUMENT_TYPE_NAMES = frozenset(
+        (
+            WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME,
+            RECONCILIATION_DOCUMENT_TYPE_NAME,
+        )
+    )
 
     SEARCH_FIELD_ALL = 'all'
     SEARCH_FIELD_ORIGINAL_FILENAME = 'original_filename'
@@ -431,6 +437,68 @@ class ArchiveDatabase:
             "deleted_at": row["deleted_at"],
         }
 
+    @staticmethod
+    def _document_type_row_to_dict(row):
+        if row is None:
+            return None
+
+        return {
+            "id": int(row["id"]),
+            "name": str(row["name"]),
+            "sort_order": int(row["sort_order"]),
+            "created_at": row["created_at"],
+            "is_active": bool(row["is_active"]),
+            "deleted_at": row["deleted_at"],
+        }
+
+    @classmethod
+    def _is_reserved_document_type_name(
+        cls,
+        name,
+    ):
+        normalized = str(name or "").strip()
+
+        if not normalized:
+            return False
+
+        normalized_folded = normalized.casefold()
+
+        return any(
+            normalized_folded == reserved.casefold()
+            for reserved in cls.RESERVED_DOCUMENT_TYPE_NAMES
+        )
+
+    def _require_active_workspace_with_conn(
+        self,
+        conn,
+        workspace_id,
+    ):
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        row = conn.execute(
+            """
+            SELECT id
+            FROM workspaces
+            WHERE id = ?
+              AND is_active = 1
+              AND deleted_at IS NULL
+            LIMIT 1;
+            """,
+            (normalized_workspace_id,),
+        ).fetchone()
+
+        if row is None:
+            raise LookupError(
+                "Active workspace not found."
+            )
+
+        return normalized_workspace_id
+
     def list_workspaces(
         self,
         *,
@@ -583,11 +651,9 @@ class ArchiveDatabase:
         conn,
         workspace_id,
     ):
-        normalized_workspace_id = (
-            self._normalize_positive_int(
-                workspace_id,
-                "workspace_id",
-            )
+        normalized_workspace_id = self._require_active_workspace_with_conn(
+            conn,
+            workspace_id,
         )
 
         row = conn.execute(
@@ -676,6 +742,722 @@ class ArchiveDatabase:
                     workspace_id,
                 )
             )
+
+    def create_document_type(
+        self,
+        workspace_id,
+        name,
+    ):
+        normalized_name = self._require_text(
+            name,
+            "name",
+        )
+
+        if self._is_reserved_document_type_name(
+            normalized_name
+        ):
+            raise ValueError(
+                "Reserved document type names are managed internally."
+            )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            existing = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND name = ? COLLATE NOCASE
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_name,
+                ),
+            ).fetchone()
+
+            if existing is not None:
+                document_type_id = int(existing["id"])
+
+                if bool(existing["is_active"]):
+                    raise ValueError(
+                        "Document type name already exists."
+                    )
+
+                conn.execute(
+                    """
+                    UPDATE document_types
+                    SET
+                        name = ?,
+                        is_active = 1,
+                        deleted_at = NULL
+                    WHERE workspace_id = ?
+                      AND id = ?;
+                    """,
+                    (
+                        normalized_name,
+                        normalized_workspace_id,
+                        document_type_id,
+                    ),
+                )
+
+                refreshed = conn.execute(
+                    """
+                    SELECT
+                        id,
+                        name,
+                        sort_order,
+                        created_at,
+                        is_active,
+                        deleted_at
+                    FROM document_types
+                    WHERE workspace_id = ?
+                      AND id = ?
+                    LIMIT 1;
+                    """,
+                    (
+                        normalized_workspace_id,
+                        document_type_id,
+                    ),
+                ).fetchone()
+
+                return self._document_type_row_to_dict(
+                    refreshed
+                )
+
+            sort_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(MAX(sort_order), -1)
+                        AS max_sort_order
+                FROM document_types
+                WHERE workspace_id = ?;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+            next_sort_order = (
+                int(sort_row["max_sort_order"]) + 1
+                if sort_row is not None
+                else 0
+            )
+
+            cursor = conn.execute(
+                """
+                INSERT INTO document_types (
+                    workspace_id,
+                    name,
+                    is_active,
+                    sort_order,
+                    deleted_at
+                )
+                VALUES (?, ?, 1, ?, NULL);
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_name,
+                    next_sort_order,
+                ),
+            )
+
+            document_type_id = int(cursor.lastrowid)
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    document_type_id,
+                ),
+            ).fetchone()
+
+        return self._document_type_row_to_dict(
+            refreshed
+        )
+
+    def rename_document_type(
+        self,
+        workspace_id,
+        document_type_id,
+        new_name,
+    ):
+        normalized_document_type_id = (
+            self._normalize_positive_int(
+                document_type_id,
+                "document_type_id",
+            )
+        )
+        normalized_new_name = self._require_text(
+            new_name,
+            "new_name",
+        )
+
+        if self._is_reserved_document_type_name(
+            normalized_new_name
+        ):
+            raise ValueError(
+                "Reserved document type names are managed internally."
+            )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            current = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                  AND is_active = 1
+                  AND deleted_at IS NULL
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+            if current is None:
+                raise LookupError(
+                    "Active document type not found."
+                )
+
+            duplicate = conn.execute(
+                """
+                SELECT id
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id != ?
+                  AND name = ? COLLATE NOCASE
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                    normalized_new_name,
+                ),
+            ).fetchone()
+
+            if duplicate is not None:
+                raise ValueError(
+                    "Document type name already exists."
+                )
+
+            conn.execute(
+                """
+                UPDATE document_types
+                SET
+                    name = ?
+                WHERE workspace_id = ?
+                  AND id = ?;
+                """,
+                (
+                    normalized_new_name,
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+        return self._document_type_row_to_dict(
+            refreshed
+        )
+
+    def deactivate_document_type(
+        self,
+        workspace_id,
+        document_type_id,
+    ):
+        normalized_document_type_id = (
+            self._normalize_positive_int(
+                document_type_id,
+                "document_type_id",
+            )
+        )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            current = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                  AND is_active = 1
+                  AND deleted_at IS NULL
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+            if current is None:
+                raise LookupError(
+                    "Active document type not found."
+                )
+
+            if self._is_reserved_document_type_name(
+                current["name"]
+            ):
+                raise ValueError(
+                    "Reserved document type cannot be deactivated."
+                )
+
+            in_use = conn.execute(
+                """
+                SELECT 1
+                FROM files
+                WHERE workspace_id = ?
+                  AND document_type_id = ?
+                  AND status = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                    self.STATUS_ACTIVE,
+                ),
+            ).fetchone()
+
+            if in_use is not None:
+                raise ValueError(
+                    "Document type is still used by active files."
+                )
+
+            conn.execute(
+                """
+                UPDATE document_types
+                SET
+                    is_active = 0,
+                    deleted_at = CURRENT_TIMESTAMP
+                WHERE workspace_id = ?
+                  AND id = ?;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+        return self._document_type_row_to_dict(
+            refreshed
+        )
+
+    def reactivate_document_type(
+        self,
+        workspace_id,
+        document_type_id,
+    ):
+        normalized_document_type_id = (
+            self._normalize_positive_int(
+                document_type_id,
+                "document_type_id",
+            )
+        )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            current = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+            if current is None:
+                raise LookupError(
+                    "Document type not found."
+                )
+
+            duplicate_active = conn.execute(
+                """
+                SELECT id
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id != ?
+                  AND is_active = 1
+                  AND deleted_at IS NULL
+                  AND name = ? COLLATE NOCASE
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                    str(current["name"]),
+                ),
+            ).fetchone()
+
+            if duplicate_active is not None:
+                raise ValueError(
+                    "Document type name already exists."
+                )
+
+            conn.execute(
+                """
+                UPDATE document_types
+                SET
+                    is_active = 1,
+                    deleted_at = NULL
+                WHERE workspace_id = ?
+                  AND id = ?;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+        return self._document_type_row_to_dict(
+            refreshed
+        )
+
+    def get_document_type(
+        self,
+        workspace_id,
+        document_type_id,
+    ):
+        normalized_document_type_id = (
+            self._normalize_positive_int(
+                document_type_id,
+                "document_type_id",
+            )
+        )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND id = ?
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    normalized_document_type_id,
+                ),
+            ).fetchone()
+
+        return self._document_type_row_to_dict(
+            row
+        )
+
+    def list_document_types(
+        self,
+        workspace_id,
+        *,
+        include_inactive=False,
+    ):
+        if not isinstance(include_inactive, bool):
+            raise TypeError(
+                "include_inactive must be a boolean."
+            )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            where_sql = ""
+            order_sql = """
+                ORDER BY
+                    sort_order,
+                    name COLLATE NOCASE,
+                    id
+            """
+
+            if not include_inactive:
+                where_sql = """
+                    AND is_active = 1
+                    AND deleted_at IS NULL
+                """
+            else:
+                order_sql = """
+                    ORDER BY
+                        is_active DESC,
+                        sort_order,
+                        name COLLATE NOCASE,
+                        id
+                """
+
+            rows = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                {where_sql}
+                {order_sql};
+                """,
+                (normalized_workspace_id,),
+            ).fetchall()
+
+        return [
+            self._document_type_row_to_dict(row)
+            for row in rows
+        ]
+
+    def reorder_document_types(
+        self,
+        workspace_id,
+        ordered_document_type_ids,
+    ):
+        if not isinstance(
+            ordered_document_type_ids,
+            (list, tuple),
+        ):
+            raise TypeError(
+                "ordered_document_type_ids must be a list of IDs."
+            )
+
+        normalized_document_type_ids = [
+            self._normalize_positive_int(
+                value,
+                "document_type_id",
+            )
+            for value in ordered_document_type_ids
+        ]
+
+        if len(set(normalized_document_type_ids)) != len(
+            normalized_document_type_ids
+        ):
+            raise ValueError(
+                "Each document type ID must appear exactly once."
+            )
+
+        with self._connect() as conn:
+            normalized_workspace_id = self._require_active_workspace_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?;
+                """,
+                (normalized_workspace_id,),
+            ).fetchall()
+
+            workspace_document_type_ids = {
+                int(row["id"])
+                for row in rows
+            }
+            active_document_type_ids = [
+                int(row["id"])
+                for row in rows
+                if bool(row["is_active"])
+                and row["deleted_at"] is None
+            ]
+
+            requested_id_set = set(
+                normalized_document_type_ids
+            )
+            unknown_ids = (
+                requested_id_set
+                - workspace_document_type_ids
+            )
+
+            if unknown_ids:
+                raise ValueError(
+                    "All document type IDs must belong to workspace."
+                )
+
+            active_id_set = set(active_document_type_ids)
+
+            if (
+                requested_id_set != active_id_set
+                or len(normalized_document_type_ids)
+                != len(active_document_type_ids)
+            ):
+                raise ValueError(
+                    "Every active document type must appear exactly once."
+                )
+
+            conn.executemany(
+                """
+                UPDATE document_types
+                SET sort_order = ?
+                WHERE workspace_id = ?
+                  AND id = ?;
+                """,
+                [
+                    (
+                        index,
+                        normalized_workspace_id,
+                        document_type_id,
+                    )
+                    for index, document_type_id in enumerate(
+                        normalized_document_type_ids
+                    )
+                ],
+            )
+
+            refreshed_rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order,
+                    created_at,
+                    is_active,
+                    deleted_at
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND is_active = 1
+                  AND deleted_at IS NULL
+                ORDER BY
+                    sort_order,
+                    name COLLATE NOCASE,
+                    id;
+                """,
+                (normalized_workspace_id,),
+            ).fetchall()
+
+        return [
+            self._document_type_row_to_dict(row)
+            for row in refreshed_rows
+        ]
 
     def designate_workspace(
         self,
@@ -1014,27 +1796,18 @@ class ArchiveDatabase:
             refreshed
         )
 
-    def get_document_types(self, workspace_id):
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, name
-                FROM document_types
-                WHERE workspace_id = ?
-                    AND is_active = 1
-                    AND deleted_at IS NULL
-                ORDER BY sort_order, name COLLATE NOCASE;
-                """,
-                (workspace_id,),
-            ).fetchall()
-
-        return [dict(row) for row in rows]
-
-    def _ensure_reconciliation_document_type_with_conn(
+    def get_workspace_fallback_document_type(
         self,
-        conn,
         workspace_id,
+        *,
+        ensure_exists=False,
     ):
+        """
+        Return the workspace's active fallback document type.
+
+        When ensure_exists=True, reactivate or create '기타' for an
+        active workspace before returning it.
+        """
         normalized_workspace_id = (
             self._normalize_positive_int(
                 workspace_id,
@@ -1042,21 +1815,73 @@ class ArchiveDatabase:
             )
         )
 
-        workspace_row = conn.execute(
-            """
-            SELECT id
-            FROM workspaces
-            WHERE id = ?
-              AND is_active = 1
-              AND deleted_at IS NULL
-            """,
-            (normalized_workspace_id,),
-        ).fetchone()
-
-        if workspace_row is None:
-            raise LookupError(
-                "Active workspace not found."
+        if not isinstance(ensure_exists, bool):
+            raise TypeError(
+                "ensure_exists must be a boolean."
             )
+
+        if ensure_exists:
+            self.ensure_workspace_fallback_document_type(
+                normalized_workspace_id
+            )
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    sort_order
+                FROM document_types
+                WHERE workspace_id = ?
+                  AND name = ?
+                  AND is_active = 1
+                  AND deleted_at IS NULL
+                LIMIT 1;
+                """,
+                (
+                    normalized_workspace_id,
+                    self.WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME,
+                ),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": int(row["id"]),
+            "name": str(row["name"]),
+            "sort_order": int(row["sort_order"]),
+        }
+
+    def get_document_types(
+        self,
+        workspace_id,
+    ):
+        rows = self.list_document_types(
+            workspace_id,
+            include_inactive=False,
+        )
+
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "sort_order": row["sort_order"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def _ensure_reconciliation_document_type_with_conn(
+        self,
+        conn,
+        workspace_id,
+    ):
+        normalized_workspace_id = self._require_active_workspace_with_conn(
+            conn,
+            workspace_id,
+        )
 
         row = conn.execute(
             """
@@ -1139,89 +1964,6 @@ class ArchiveDatabase:
                     workspace_id,
                 )
             )
-
-    def ensure_workspace(self, workspace_name, share_path, default_document_types):
-        normalized_name = self._require_text(workspace_name, "workspace_name")
-        normalized_share_path = self._require_text(str(share_path), "share_path")
-
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT id
-                FROM workspaces
-                WHERE name = ?
-                """,
-                (normalized_name,),
-            ).fetchone()
-
-            if row is None:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO workspaces (
-                        name,
-                        share_path,
-                        is_active,
-                        deleted_at
-                    )
-                    VALUES (?, ?, 1, NULL)
-                    """,
-                    (normalized_name, normalized_share_path),
-                )
-                workspace_id = int(cursor.lastrowid)
-            else:
-                workspace_id = int(row["id"])
-                conn.execute(
-                    """
-                    UPDATE workspaces
-                    SET
-                        share_path = ?,
-                        is_active = 1,
-                        deleted_at = NULL
-                    WHERE id = ?
-                    """,
-                    (normalized_share_path, workspace_id),
-                )
-
-            for idx, doc_type in enumerate(default_document_types):
-                name = self._require_text(doc_type, "document_type")
-                existing = conn.execute(
-                    """
-                    SELECT id
-                    FROM document_types
-                    WHERE workspace_id = ?
-                    AND name = ?
-                    """,
-                    (workspace_id, name),
-                ).fetchone()
-
-                if existing is None:
-                    conn.execute(
-                        """
-                        INSERT INTO document_types (
-                            workspace_id,
-                            name,
-                            is_active,
-                            sort_order,
-                            deleted_at
-                        )
-                        VALUES (?, ?, 1, ?, NULL)
-                        """,
-                        (workspace_id, name, idx),
-                    )
-                else:
-                    conn.execute(
-                        """
-                        UPDATE document_types
-                        SET
-                            is_active = 1,
-                            sort_order = ?,
-                            deleted_at = NULL
-                        WHERE id = ?
-                        """,
-                        (idx, int(existing["id"])),
-                    )
-
-        return workspace_id
 
     @staticmethod
     def _file_row_to_dict(row):

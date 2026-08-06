@@ -86,8 +86,17 @@ def show_save_files_screen(app):
             "No active workspace ID is available."
         )
 
-    document_type_records = app.db.get_document_types(
-        workspace_id
+    fallback_document_type = (
+        app.db.get_workspace_fallback_document_type(
+            workspace_id,
+            ensure_exists=True,
+        )
+    )
+
+    document_type_records = (
+        app.db.get_document_types(
+            workspace_id
+        )
     )
 
     document_type_options = [
@@ -104,6 +113,16 @@ def show_save_files_screen(app):
         raise RuntimeError(
             "This workspace has no active document types."
         )
+
+    if fallback_document_type is None:
+        raise RuntimeError(
+            "The workspace fallback document type "
+            "could not be prepared."
+        )
+
+    default_document_type_name = (
+        fallback_document_type["name"]
+    )
 
     split = tk.Frame(board, bg=SF_SURFACE)
     split.pack(fill="both", expand=True, padx=10, pady=0)
@@ -289,7 +308,10 @@ def show_save_files_screen(app):
             for row_key in target_rows:
                 source = Path(row_key)
                 row_state = row_metadata_state.setdefault(row_key, {})
-                doc_type = row_state.get("document_type") or "기타"
+                doc_type = str(
+                    row_state.get("document_type")
+                    or default_document_type_name
+                ).strip()
                 
                 tags = row_state.get("tags") or ""
 
@@ -304,12 +326,15 @@ def show_save_files_screen(app):
                             "A complete document date is required."
                         )
 
-                    document_type_id = document_type_id_by_name.get(
-                    doc_type
+                    document_type_id = (
+                        document_type_id_by_name.get(
+                            doc_type
+                        )
                     )
                     if document_type_id is None:
-                        raise ValueError(
-                            f"Unknown document type: {doc_type}"
+                        raise LookupError(
+                            "Selected document type is no longer "
+                            "active in this workspace."
                         )
                     if not source.exists() or not source.is_file():
                         raise FileNotFoundError(f"source missing: {source}")
@@ -1321,8 +1346,9 @@ def show_save_files_screen(app):
         if "date_digits" not in row_state or not str(row_state.get("date_digits", "")).strip():
             row_state["date_digits"] = modified
         if "document_type" not in row_state or not str(row_state.get("document_type", "")).strip():
-            preferred_doc_type = "계약서"
-            row_state["document_type"] = preferred_doc_type if preferred_doc_type in document_type_options else (document_type_options[0] if document_type_options else "기타")
+            row_state["document_type"] = (
+                default_document_type_name
+            )
         if "tags" not in row_state:
             row_state["tags"] = ""
         if "status_code" not in row_state:
@@ -1340,7 +1366,10 @@ def show_save_files_screen(app):
             "checked": row_key in selected_row_keys,
             "original_name": path_obj.name,
             "date": date_text,
-            "document_type": row_state.get("document_type", "기타"),
+            "document_type": row_state.get(
+                "document_type",
+                default_document_type_name,
+            ),
             "tags": row_state.get("tags", ""),
             "size": size_text,
             "status_code": row_state.get("status_code", "standby"),
@@ -1591,7 +1620,9 @@ def show_save_files_screen(app):
             row_state = row_metadata_state.setdefault(row_key, {})
             current_type = (row_state.get("document_type") or "").strip()
             if not current_type:
-                current_type = document_type_options[0] if document_type_options else "기타"
+                current_type = (
+                    default_document_type_name
+                )
                 row_state["document_type"] = current_type
             doc_values.append(current_type)
 
@@ -2375,7 +2406,9 @@ def show_save_files_screen(app):
             selection = listbox.curselection()
             if not selection:
                 return "break"
-            chosen = listbox.get(selection[0]).strip() or "기타"
+            chosen = listbox.get(selection[0]).strip()
+            if not chosen:
+                return "break"
             value_var.set(chosen)
             row_metadata_state.setdefault(row_key, {})["document_type"] = chosen
             close_row_doc_type_popup()
@@ -2563,8 +2596,9 @@ def show_save_files_screen(app):
 
             doc_type_display_value = str(row_values.get("document_type", "") or "").strip()
             if not doc_type_display_value:
-                preferred_doc_type = "계약서"
-                doc_type_display_value = preferred_doc_type if preferred_doc_type in document_type_options else (document_type_options[0] if document_type_options else "기타")
+                doc_type_display_value = (
+                    default_document_type_name
+                )
                 row_state["document_type"] = doc_type_display_value
 
             tag_display_value = str(row_values.get("tags", "") or "")
@@ -2704,7 +2738,10 @@ def show_save_files_screen(app):
             set_row_doc_expand_icon(doc_expand_label, False, False)
 
             def on_doc_type_change(*_args, row_key=row_key, var=doc_type_var):
-                row_metadata_state.setdefault(row_key, {})["document_type"] = var.get().strip() or "기타"
+                row_metadata_state.setdefault(row_key, {})["document_type"] = (
+                    var.get().strip()
+                    or default_document_type_name
+                )
 
             doc_type_var.trace_add("write", on_doc_type_change)
             doc_type_entry.bind("<KeyPress>", lambda _event: "break", add="+")
