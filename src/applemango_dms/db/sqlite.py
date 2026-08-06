@@ -16,6 +16,8 @@ class ArchiveDatabase:
     RECONCILIATION_DOCUMENT_TYPE_NAME = "미분류"
     RECONCILIATION_UPLOADER_NAME = "시스템: NAS 동기화"
 
+    WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME = "기타"
+
     SEARCH_FIELD_ALL = 'all'
     SEARCH_FIELD_ORIGINAL_FILENAME = 'original_filename'
     SEARCH_FIELD_ARCHIVED_FILENAME = 'archived_filename'
@@ -413,6 +415,603 @@ class ArchiveDatabase:
                 metadata_status
             );
             """
+        )
+
+    @staticmethod
+    def _workspace_row_to_dict(row):
+        if row is None:
+            return None
+
+        return {
+            "id": int(row["id"]),
+            "name": str(row["name"]),
+            "share_path": str(row["share_path"]),
+            "is_active": bool(row["is_active"]),
+            "created_at": row["created_at"],
+            "deleted_at": row["deleted_at"],
+        }
+
+    def list_workspaces(
+        self,
+        *,
+        include_inactive=False,
+    ):
+        """
+        Return registered DMS workspaces.
+
+        By default, only active designated workspaces are returned.
+        Set include_inactive=True for workspace administration.
+        """
+        if not isinstance(include_inactive, bool):
+            raise TypeError(
+                "include_inactive must be a boolean."
+            )
+
+        clauses = []
+
+        if not include_inactive:
+            clauses.extend(
+                [
+                    "is_active = 1",
+                    "deleted_at IS NULL",
+                ]
+            )
+
+        where_sql = ""
+
+        if clauses:
+            where_sql = (
+                "WHERE "
+                + "\nAND ".join(clauses)
+            )
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                {where_sql}
+                ORDER BY
+                    name COLLATE NOCASE,
+                    id;
+                """
+            ).fetchall()
+
+        return [
+            self._workspace_row_to_dict(row)
+            for row in rows
+        ]
+
+    def get_workspace_by_id(
+        self,
+        workspace_id,
+        *,
+        require_active=False,
+    ):
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        if not isinstance(require_active, bool):
+            raise TypeError(
+                "require_active must be a boolean."
+            )
+
+        active_sql = ""
+
+        if require_active:
+            active_sql = """
+              AND is_active = 1
+              AND deleted_at IS NULL
+            """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE id = ?
+                {active_sql}
+                LIMIT 1;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+        return self._workspace_row_to_dict(row)
+
+    def get_workspace_by_name(
+        self,
+        workspace_name,
+        *,
+        require_active=False,
+    ):
+        normalized_name = self._require_text(
+            workspace_name,
+            "workspace_name",
+        )
+
+        if not isinstance(require_active, bool):
+            raise TypeError(
+                "require_active must be a boolean."
+            )
+
+        active_sql = ""
+
+        if require_active:
+            active_sql = """
+              AND is_active = 1
+              AND deleted_at IS NULL
+            """
+
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE name = ?
+                {active_sql}
+                LIMIT 1;
+                """,
+                (normalized_name,),
+            ).fetchone()
+
+        return self._workspace_row_to_dict(row)
+
+    def _ensure_workspace_fallback_document_type_with_conn(
+        self,
+        conn,
+        workspace_id,
+    ):
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                is_active,
+                deleted_at
+            FROM document_types
+            WHERE workspace_id = ?
+              AND name = ?
+            LIMIT 1;
+            """,
+            (
+                normalized_workspace_id,
+                self.WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME,
+            ),
+        ).fetchone()
+
+        if row is not None:
+            document_type_id = int(row["id"])
+
+            conn.execute(
+                """
+                UPDATE document_types
+                SET
+                    is_active = 1,
+                    deleted_at = NULL
+                WHERE workspace_id = ?
+                  AND id = ?;
+                """,
+                (
+                    normalized_workspace_id,
+                    document_type_id,
+                ),
+            )
+
+            return document_type_id
+
+        sort_row = conn.execute(
+            """
+            SELECT
+                COALESCE(MAX(sort_order), -1)
+                    AS max_sort_order
+            FROM document_types
+            WHERE workspace_id = ?;
+            """,
+            (normalized_workspace_id,),
+        ).fetchone()
+
+        next_sort_order = (
+            int(sort_row["max_sort_order"]) + 1
+            if sort_row is not None
+            else 0
+        )
+
+        cursor = conn.execute(
+            """
+            INSERT INTO document_types (
+                workspace_id,
+                name,
+                is_active,
+                sort_order,
+                deleted_at
+            )
+            VALUES (?, ?, 1, ?, NULL);
+            """,
+            (
+                normalized_workspace_id,
+                self.WORKSPACE_FALLBACK_DOCUMENT_TYPE_NAME,
+                next_sort_order,
+            ),
+        )
+
+        return int(cursor.lastrowid)
+
+    def ensure_workspace_fallback_document_type(
+        self,
+        workspace_id,
+    ):
+        with self._connect() as conn:
+            return (
+                self
+                ._ensure_workspace_fallback_document_type_with_conn(
+                    conn,
+                    workspace_id,
+                )
+            )
+
+    def designate_workspace(
+        self,
+        workspace_name,
+        share_path,
+    ):
+        """
+        Designate a discovered folder as a DMS workspace.
+
+        A new record is created when neither the name nor path is
+        registered. An existing inactive record is reactivated.
+
+        The operation guarantees that the workspace has an active
+        fallback document type named '기타'.
+        """
+        normalized_name = self._require_text(
+            workspace_name,
+            "workspace_name",
+        )
+        normalized_share_path = self._require_text(
+            str(share_path),
+            "share_path",
+        )
+
+        with self._connect() as conn:
+            name_row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE name = ?
+                LIMIT 1;
+                """,
+                (normalized_name,),
+            ).fetchone()
+
+            path_row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE share_path = ?
+                LIMIT 1;
+                """,
+                (normalized_share_path,),
+            ).fetchone()
+
+            if (
+                name_row is not None
+                and path_row is not None
+                and int(name_row["id"])
+                != int(path_row["id"])
+            ):
+                raise ValueError(
+                    "Workspace name and share path belong to "
+                    "different registered workspaces."
+                )
+
+            existing_row = (
+                name_row
+                if name_row is not None
+                else path_row
+            )
+
+            if existing_row is None:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO workspaces (
+                        name,
+                        share_path,
+                        is_active,
+                        deleted_at
+                    )
+                    VALUES (?, ?, 1, NULL);
+                    """,
+                    (
+                        normalized_name,
+                        normalized_share_path,
+                    ),
+                )
+
+                workspace_id = int(
+                    cursor.lastrowid
+                )
+
+            else:
+                workspace_id = int(
+                    existing_row["id"]
+                )
+
+                conn.execute(
+                    """
+                    UPDATE workspaces
+                    SET
+                        name = ?,
+                        share_path = ?,
+                        is_active = 1,
+                        deleted_at = NULL
+                    WHERE id = ?;
+                    """,
+                    (
+                        normalized_name,
+                        normalized_share_path,
+                        workspace_id,
+                    ),
+                )
+
+            self._ensure_workspace_fallback_document_type_with_conn(
+                conn,
+                workspace_id,
+            )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE id = ?
+                LIMIT 1;
+                """,
+                (workspace_id,),
+            ).fetchone()
+
+        if refreshed is None:
+            raise RuntimeError(
+                "Designated workspace could not be retrieved."
+            )
+
+        return self._workspace_row_to_dict(
+            refreshed
+        )
+
+    def deactivate_workspace(
+        self,
+        workspace_id,
+    ):
+        """
+        Remove a workspace from the active DMS selection list
+        without deleting its database records or metadata.
+        """
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE id = ?
+                LIMIT 1;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+            if row is None:
+                raise LookupError(
+                    "Workspace not found."
+                )
+
+            if bool(row["is_active"]):
+                conn.execute(
+                    """
+                    UPDATE workspaces
+                    SET
+                        is_active = 0,
+                        deleted_at = CURRENT_TIMESTAMP
+                    WHERE id = ?;
+                    """,
+                    (normalized_workspace_id,),
+                )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE id = ?
+                LIMIT 1;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+        if refreshed is None:
+            raise RuntimeError(
+                "Deactivated workspace could not be retrieved."
+            )
+
+        return self._workspace_row_to_dict(
+            refreshed
+        )
+
+    def reactivate_workspace(
+        self,
+        workspace_id,
+        *,
+        share_path=None,
+    ):
+        """
+        Reactivate a registered workspace.
+
+        share_path may be supplied when a discovered folder path
+        needs to refresh the stored location.
+        """
+        normalized_workspace_id = (
+            self._normalize_positive_int(
+                workspace_id,
+                "workspace_id",
+            )
+        )
+
+        normalized_share_path = None
+
+        if share_path is not None:
+            normalized_share_path = self._require_text(
+                str(share_path),
+                "share_path",
+            )
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path
+                FROM workspaces
+                WHERE id = ?
+                LIMIT 1;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+            if row is None:
+                raise LookupError(
+                    "Workspace not found."
+                )
+
+            target_share_path = (
+                normalized_share_path
+                if normalized_share_path is not None
+                else str(row["share_path"])
+            )
+
+            collision = conn.execute(
+                """
+                SELECT id
+                FROM workspaces
+                WHERE share_path = ?
+                  AND id != ?
+                LIMIT 1;
+                """,
+                (
+                    target_share_path,
+                    normalized_workspace_id,
+                ),
+            ).fetchone()
+
+            if collision is not None:
+                raise ValueError(
+                    "Another workspace already uses this "
+                    "share path."
+                )
+
+            conn.execute(
+                """
+                UPDATE workspaces
+                SET
+                    share_path = ?,
+                    is_active = 1,
+                    deleted_at = NULL
+                WHERE id = ?;
+                """,
+                (
+                    target_share_path,
+                    normalized_workspace_id,
+                ),
+            )
+
+            self._ensure_workspace_fallback_document_type_with_conn(
+                conn,
+                normalized_workspace_id,
+            )
+
+            refreshed = conn.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    share_path,
+                    is_active,
+                    created_at,
+                    deleted_at
+                FROM workspaces
+                WHERE id = ?
+                LIMIT 1;
+                """,
+                (normalized_workspace_id,),
+            ).fetchone()
+
+        if refreshed is None:
+            raise RuntimeError(
+                "Reactivated workspace could not be retrieved."
+            )
+
+        return self._workspace_row_to_dict(
+            refreshed
         )
 
     def get_document_types(self, workspace_id):

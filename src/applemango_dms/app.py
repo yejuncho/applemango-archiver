@@ -48,8 +48,15 @@ from applemango_dms.services.auth import (
 from applemango_dms.services.nas import (
     check_server_availability,
     check_local_network_connectivity,
-    discover_server_shares,
     normalize_drive_letter,
+)
+
+from applemango_dms.services.workspace_discovery import (
+    discover_workspace_candidates,
+)
+
+from applemango_dms.services.workspace_designation import (
+    build_workspace_designation_rows,
 )
 
 from applemango_dms.services.workspace_mapping import (
@@ -670,6 +677,118 @@ class SequenceArchiverApp:
     def _load_demo_workspace_names(self):
         root = self._ensure_demo_workspace_root()
         return sorted([child.name for child in root.iterdir() if child.is_dir()])
+
+    def discover_workspace_candidates(self):
+        """
+        Return normalized NAS or demo folder candidates for workspace
+        designation.
+
+        This method performs discovery only. It does not create,
+        activate, or deactivate database workspace records.
+        """
+        return discover_workspace_candidates(
+            is_demo_mode=bool(state.is_demo_mode),
+            demo_workspace_root=(
+                self._get_demo_workspace_base_path()
+                if state.is_demo_mode
+                else None
+            ),
+            server_name=(
+                None
+                if state.is_demo_mode
+                else config.default_server_name
+            ),
+        )
+
+    def get_workspace_designation_rows(self):
+        """
+        Return merged discovery and database state for the workspace
+        settings UI.
+
+        This method is read-only.
+        """
+        if self.db is None:
+            raise RuntimeError(
+                "Database is not initialized."
+            )
+
+        discovered = (
+            self.discover_workspace_candidates()
+        )
+
+        registered = self.db.list_workspaces(
+            include_inactive=True
+        )
+
+        return build_workspace_designation_rows(
+            discovered,
+            registered,
+        )
+
+    def designate_workspace_candidate(
+        self,
+        workspace_name,
+        share_path,
+    ):
+        if self.db is None:
+            raise RuntimeError(
+                "Database is not initialized."
+            )
+
+        workspace = self.db.designate_workspace(
+            workspace_name,
+            share_path,
+        )
+
+        self.workspace_metadata_cache.pop(
+            workspace["name"],
+            None,
+        )
+
+        return workspace
+
+    def deactivate_designated_workspace(
+        self,
+        workspace_id,
+    ):
+        if self.db is None:
+            raise RuntimeError(
+                "Database is not initialized."
+            )
+
+        workspace = self.db.deactivate_workspace(
+            workspace_id
+        )
+
+        self.workspace_metadata_cache.pop(
+            workspace["name"],
+            None,
+        )
+
+        return workspace
+
+    def reactivate_designated_workspace(
+        self,
+        workspace_id,
+        *,
+        share_path=None,
+    ):
+        if self.db is None:
+            raise RuntimeError(
+                "Database is not initialized."
+            )
+
+        workspace = self.db.reactivate_workspace(
+            workspace_id,
+            share_path=share_path,
+        )
+
+        self.workspace_metadata_cache.pop(
+            workspace["name"],
+            None,
+        )
+
+        return workspace
 
     def set_workspace(self, workspace, drive_letter, mapped_by_app):
         state.active_workspace = workspace
