@@ -75,7 +75,7 @@ def show_document_type_management_screen(app):
     app._build_workspace_page_header(
         outer,
         "문서 유형 관리",
-        "문서 유형 관리 기능 안내 문구를 여기에 작성해 주세요.",
+        "워크스페이스에서 사용할 문서 유형을 관리하여 파일을 일관된 기준으로 분류할 수 있어요.",
     )
 
     board = tk.Frame(outer, bg=DT_SURFACE, highlightthickness=0, bd=0)

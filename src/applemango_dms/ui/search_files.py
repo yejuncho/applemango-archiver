@@ -53,7 +53,7 @@ def show_search_files_screen(app):
     render_workspace_sidebar_nav(app, shell["sidebar"], "search")
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 검색", "필요한 파일을 빠르게 찾고 관리할 수 있어요.")
+    app._build_workspace_page_header(outer, "파일 검색", "저장된 필요한 파일을 빠르게 찾고 열람하거나 관리할 수 있어요.")
 
     board = tk.Frame(outer, bg=SF_SURFACE, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)

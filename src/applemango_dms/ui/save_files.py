@@ -68,7 +68,7 @@ def show_save_files_screen(app):
     render_workspace_sidebar_nav(app, shell["sidebar"], "save")
 
     outer = shell["content"]
-    app._build_workspace_page_header(outer, "파일 저장", "파일을 체계적으로 분류하고 안전하게 보관할 수 있어요.")
+    app._build_workspace_page_header(outer, "파일 저장", "파일을 체계적으로 등록하고 문서 정보와 함께 안전하게 보관할 수 있어요.")
 
     board = tk.Frame(outer, bg=SF_SURFACE, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)

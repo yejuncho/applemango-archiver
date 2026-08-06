@@ -311,44 +311,24 @@ def show_sync_workspace_screen(app):
     render_workspace_sidebar_nav(app, shell["sidebar"], "sync")
 
     outer = shell["content"]
+    app._build_workspace_page_header(
+        outer,
+        "워크스페이스 동기화",
+        "NAS 서버와 DMS 데이터베이스를 비교하여 누락되거나 불일치하는 파일 정보를 자동으로 연동할 수 있어요.",
+    )
+
     board = tk.Frame(outer, bg=SYNC_PAGE_BG, highlightthickness=0, bd=0)
     board.pack(fill="both", expand=True, padx=0, pady=0)
 
     page = tk.Frame(board, bg=SYNC_PAGE_BG, highlightthickness=0, bd=0)
     page.pack(fill="both", expand=True, padx=15, pady=(12, 12))
     page.grid_columnconfigure(0, weight=1)
-    page.grid_rowconfigure(2, weight=1)
-
-    header = tk.Frame(page, bg=SYNC_PAGE_BG)
-    header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-    header.grid_columnconfigure(0, weight=1)
-
-    header_left = tk.Frame(header, bg=SYNC_PAGE_BG)
-    header_left.grid(row=0, column=0, sticky="w")
-
-    tk.Label(
-        header_left,
-        text="워크스페이스 동기화",
-        font=app._font(17, "bold"),
-        fg=SYNC_TEXT_TITLE,
-        bg=SYNC_PAGE_BG,
-        anchor="w",
-    ).pack(anchor="w")
-
-    tk.Label(
-        header_left,
-        text="NAS 워크스페이스와 DMS 데이터베이스를 동기화해요.",
-        font=app._font(12),
-        fg="#1f2540",
-        bg=SYNC_PAGE_BG,
-        anchor="w",
-        justify="left",
-    ).pack(anchor="w", pady=(4, 0))
+    page.grid_rowconfigure(1, weight=1)
 
     app.status_badge = None
 
     middle = tk.Frame(page, bg=SYNC_PAGE_BG)
-    middle.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+    middle.grid(row=0, column=0, sticky="ew", pady=(0, 12))
     middle.grid_columnconfigure(0, weight=35)
     middle.grid_columnconfigure(1, weight=65)
 
@@ -517,7 +497,7 @@ def show_sync_workspace_screen(app):
     app.progress_bar.after_idle(redraw_progress)
 
     result_card_canvas, result_card = _create_rounded_card(app, page, radius=16)
-    result_card_canvas.grid(row=2, column=0, sticky="nsew")
+    result_card_canvas.grid(row=1, column=0, sticky="nsew")
 
     tk.Label(
         result_card,

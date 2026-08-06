@@ -581,10 +581,10 @@ def build_sidebar_nav(app, parent, active_key, items, icon_photos=None):
 
 def _workspace_sidebar_items(app):
     return [
-        ("save", "\U0001F4E4", "파일 저장", "파일을 등록하고 문서 정보와\n함께 안전하게 보관해요.", app.show_save_files_screen, colors.PRIMARY),
-        ("search", "\U0001F50D", "파일 검색", "저장된 파일을 빠르게\n찾고 열람하거나 관리해요.", app.show_search_files_screen, MENU_TEXT_PRIMARY),
-        ("sync", "\U0001F504", "워크스페이스 동기화", "동기화 안내 문구를\n여기에 작성해 주세요.", app.show_sync_workspace_screen, MENU_TEXT_PRIMARY),
-        ("doc_type", "\U0001F4C1", "문서 유형 관리", "문서 유형 관리 안내 문구를\n여기에 작성해 주세요.", app.show_document_type_management_screen, MENU_TEXT_PRIMARY),
+        ("save", "\U0001F4E4", "파일 저장", "파일을 분류하고\n안전하게 보관해요", app.show_save_files_screen, colors.PRIMARY),
+        ("search", "\U0001F50D", "파일 검색", "필요한 파일을\n빠르게 찾고 관리해요", app.show_search_files_screen, MENU_TEXT_PRIMARY),
+        ("sync", "\U0001F504", "워크스페이스 동기화", "서버와 데이터베이스를\n연동해요", app.show_sync_workspace_screen, MENU_TEXT_PRIMARY),
+        ("doc_type", "\U0001F4C1", "문서 유형 관리", "워크스페이스에서 사용할\n문서 유형을 관리해요", app.show_document_type_management_screen, MENU_TEXT_PRIMARY),
     ]
 
 def _workspace_sidebar_icon_photos(app):
